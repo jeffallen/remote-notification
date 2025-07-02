@@ -16,7 +16,7 @@ A minimal Android app that registers device tokens with Firebase Cloud Messaging
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Create a new project or use an existing one
 3. Add an Android app to your project:
-   - Package name: `com.example.fcmapp`
+   - Package name: `org.nella.fcmapp`
    - App nickname: FCM App (optional)
 4. Download the `google-services.json` file
 5. Replace the placeholder `google-services.json` in the `app/` directory with the real one

@@ -1,4 +1,4 @@
-package com.example.fcmapp
+package org.nella.fcmapp
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

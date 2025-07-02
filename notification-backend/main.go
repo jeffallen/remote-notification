@@ -87,7 +87,7 @@ func main() {
 	http.HandleFunc("/status", handleStatus)
 	http.HandleFunc("/", handleRoot)
 
-	port := ":8080"
+	port := "8080"
 	log.Printf("FCM Notification Server starting on port %s", port)
 	log.Printf("Endpoints:")
 	log.Printf("  POST /register - Register FCM token")
@@ -96,7 +96,7 @@ func main() {
 	log.Printf("  GET  /status   - Show registered token count")
 	log.Printf("  GET  /         - Show this help")
 
-	if err := http.ListenAndServe(port, nil); err != nil {
+	if err := http.ListenAndServe(":" + port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }

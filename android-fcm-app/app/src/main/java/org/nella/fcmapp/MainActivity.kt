@@ -1,4 +1,4 @@
-package com.example.fcmapp
+package org.nella.fcmapp
 
 import android.os.Bundle
 import android.util.Log
@@ -20,7 +20,7 @@ class MainActivity : AppCompatActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
-        private const val REGISTER_URL = "https://example.com/register"
+        private const val REGISTER_URL = "http://10.0.2.2:8081/register"
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {

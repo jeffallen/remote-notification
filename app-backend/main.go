@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	notificationBackendURL = "http://localhost:8080" // notification-backend server
+	notificationBackendURL = "http://192.168.1.141:8080"
 )
 
 type TokenRegistration struct {
@@ -76,12 +76,12 @@ func main() {
 	http.HandleFunc("/send-all", handleSendAll)
 	http.HandleFunc("/", handleHome)
 
-	port := ":8081"
+	port := "8081"
 	log.Printf("App Backend Server starting on port %s", port)
 	log.Printf("Forwarding to notification backend: %s", notificationBackendURL)
-	log.Printf("Web interface available at: http://localhost%s", port)
+	log.Printf("Web interface available at: http://192.168.1.141:%s", port)
 
-	if err := http.ListenAndServe(port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
