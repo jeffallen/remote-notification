@@ -31,6 +31,12 @@ type NotificationRequest struct {
 	Body  string `json:"body"`
 }
 
+type SingleNotificationRequest struct {
+	Token string `json:"token"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
 // Simple in-memory token storage
 type TokenStore struct {
 	mu     sync.RWMutex
@@ -77,6 +83,7 @@ var tokenStore = NewTokenStore()
 func main() {
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send", handleSend)
+	http.HandleFunc("/notify", handleNotify)
 	http.HandleFunc("/status", handleStatus)
 	http.HandleFunc("/", handleRoot)
 
@@ -85,6 +92,7 @@ func main() {
 	log.Printf("Endpoints:")
 	log.Printf("  POST /register - Register FCM token")
 	log.Printf("  POST /send     - Send notification to all registered tokens")
+	log.Printf("  POST /notify   - Send notification to specific token")
 	log.Printf("  GET  /status   - Show registered token count")
 	log.Printf("  GET  /         - Show this help")
 
@@ -188,6 +196,56 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func handleNotify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	var notif SingleNotificationRequest
+	if err := json.Unmarshal(body, &notif); err != nil {
+		log.Printf("Error parsing JSON: %v", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if notif.Token == "" || notif.Title == "" || notif.Body == "" {
+		http.Error(w, "Token, title and body are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := sendFCMNotification(notif.Token, notif.Title, notif.Body); err != nil {
+		tokenPreview := notif.Token
+		if len(notif.Token) > 20 {
+			tokenPreview = notif.Token[:20] + "..."
+		}
+		log.Printf("Failed to send to token %s: %v", tokenPreview, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		response := map[string]interface{}{
+			"success": false,
+			"message": "Failed to send notification",
+			"error":   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Notification sent successfully",
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
@@ -207,6 +265,9 @@ Endpoints:
 
   POST /send - Send notification to all registered tokens
     Body: {"title": "Hello", "body": "Test message"}
+
+  POST /notify - Send notification to specific token
+    Body: {"token": "fcm-token", "title": "Hello", "body": "Test message"}
 
   GET /status - Show server status
     Returns: {"registered_tokens": N, "server_key_configured": true/false}
