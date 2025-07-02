@@ -10,17 +10,22 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import javax.net.ssl.HostnameVerifier
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var registerButton: Button
     private lateinit var statusText: TextView
-    private val client = OkHttpClient()
+    private val client = createUnsafeOkHttpClient()
     
     companion object {
         private const val TAG = "MainActivity"
-        private const val REGISTER_URL = "http://10.0.2.2:8081/register"
+        private const val REGISTER_URL = "https://10.0.2.2:8443/register"
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,5 +102,33 @@ class MainActivity : AppCompatActivity() {
     
     private fun updateStatus(message: String) {
         statusText.text = message
+    }
+    
+    private fun createUnsafeOkHttpClient(): OkHttpClient {
+        return try {
+            // Create a trust manager that does not validate certificate chains
+            val trustAllCerts = arrayOf<TrustManager>(
+                object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                }
+            )
+
+            // Install the all-trusting trust manager
+            val sslContext = SSLContext.getInstance("SSL")
+            sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+
+            // Create an ssl socket factory with our all-trusting manager
+            val sslSocketFactory = sslContext.socketFactory
+
+            OkHttpClient.Builder()
+                .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+                .hostnameVerifier(HostnameVerifier { _, _ -> true })
+                .build()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating unsafe HTTP client", e)
+            OkHttpClient()
+        }
     }
 }

@@ -76,12 +76,13 @@ func main() {
 	http.HandleFunc("/send-all", handleSendAll)
 	http.HandleFunc("/", handleHome)
 
-	port := "8081"
-	log.Printf("App Backend Server starting on port %s", port)
+	port := "8443"
+	log.Printf("App Backend Server starting on HTTPS port %s", port)
 	log.Printf("Forwarding to notification backend: %s", notificationBackendURL)
-	log.Printf("Web interface available at: http://192.168.1.141:%s", port)
+	log.Printf("Web interface available at: https://localhost:%s", port)
+	log.Printf("Android emulator can access at: https://10.0.2.2:%s/", port)
 
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServeTLS(":"+port, "cert.pem", "key.pem", nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
