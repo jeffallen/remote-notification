@@ -31,3 +31,8 @@ replay_pid*
 key.json
 *.json
 !google-services.json
+
+# RSA private keys
+private_key.pem
+*private*.pem
+*.key

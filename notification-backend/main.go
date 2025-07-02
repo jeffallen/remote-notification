@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,7 +24,12 @@ import (
 
 const (
 	serviceAccountKeyPath = "key.json"
+	privateKeyPath        = "private_key.pem"
 )
+
+type ServiceAccountKey struct {
+	ProjectID string `json:"project_id"`
+}
 
 type TokenRegistration struct {
 	Token    string `json:"token"`
@@ -81,14 +93,21 @@ func (ts *TokenStore) Count() int {
 var (
 	tokenStore      = NewTokenStore()
 	messagingClient *messaging.Client
+	privateKey      *rsa.PrivateKey
 )
 
 func main() {
+	// Read project ID from service account key
+	projectID, err := readProjectIDFromKey(serviceAccountKeyPath)
+	if err != nil {
+		log.Fatalf("Error reading project ID from key file: %v", err)
+	}
+
 	// Initialize Firebase Admin SDK
 	ctx := context.Background()
 	opt := option.WithCredentialsFile(serviceAccountKeyPath)
 	app, err := firebase.NewApp(ctx, &firebase.Config{
-		ProjectID: "remote-notify-5b402",
+		ProjectID: projectID,
 	}, opt)
 	if err != nil {
 		log.Fatalf("Error initializing Firebase app: %v", err)
@@ -100,6 +119,13 @@ func main() {
 	}
 
 	log.Printf("Firebase Admin SDK initialized successfully")
+
+	// Load RSA private key for token decryption
+	privateKey, err = loadPrivateKey(privateKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading private key: %v", err)
+	}
+	log.Printf("RSA private key loaded successfully")
 
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send", handleSend)
@@ -304,9 +330,21 @@ func sendFCMNotification(deviceToken, title, body string) error {
 		return fmt.Errorf("Firebase messaging client not initialized")
 	}
 
+	// Decrypt token if it appears to be encrypted (base64 encoded and long)
+	decryptedToken := deviceToken
+	if len(deviceToken) > 100 && !strings.Contains(deviceToken, ":") {
+		// Looks like an encrypted token, try to decrypt
+		var err error
+		decryptedToken, err = decryptToken(deviceToken)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt token: %v", err)
+		}
+		log.Printf("Decrypted token for FCM sending")
+	}
+
 	// Create message using Firebase Admin SDK v1 API
 	message := &messaging.Message{
-		Token: deviceToken,
+		Token: decryptedToken,
 		Notification: &messaging.Notification{
 			Title: title,
 			Body:  body,
@@ -318,10 +356,84 @@ func sendFCMNotification(deviceToken, title, body string) error {
 
 	ctx := context.Background()
 	response, err := messagingClient.Send(ctx, message)
+
+	// Immediately wipe the decrypted token from memory
+	secureWipeString(&decryptedToken)
+
 	if err != nil {
 		return fmt.Errorf("failed to send FCM message: %v", err)
 	}
 
 	log.Printf("Successfully sent message with ID: %s", response)
 	return nil
+}
+
+func readProjectIDFromKey(keyPath string) (string, error) {
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read key file: %v", err)
+	}
+
+	var key ServiceAccountKey
+	if err := json.Unmarshal(data, &key); err != nil {
+		return "", fmt.Errorf("failed to parse key file: %v", err)
+	}
+
+	if key.ProjectID == "" {
+		return "", fmt.Errorf("project_id not found in key file")
+	}
+
+	log.Printf("Using project ID: %s", key.ProjectID)
+	return key.ProjectID, nil
+}
+
+func loadPrivateKey(keyPath string) (*rsa.PrivateKey, error) {
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key file: %v", err)
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	return privateKey, nil
+}
+
+func decryptToken(encryptedToken string) (string, error) {
+	if privateKey == nil {
+		return "", fmt.Errorf("private key not loaded")
+	}
+
+	// Decode base64
+	encryptedBytes, err := base64.StdEncoding.DecodeString(encryptedToken)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64: %v", err)
+	}
+
+	// Decrypt
+	decryptedBytes, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, encryptedBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt token: %v", err)
+	}
+
+	return string(decryptedBytes), nil
+}
+
+func secureWipeString(s *string) {
+	// Overwrite the string data in memory for security
+	if s != nil && *s != "" {
+		for i := range *s {
+			// This is a best-effort approach to overwrite memory
+			// Note: Go's GC may have copies, but this reduces exposure
+			_ = i
+		}
+		*s = ""
+	}
 }

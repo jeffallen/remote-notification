@@ -11,6 +11,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.security.cert.X509Certificate
+import java.security.KeyFactory
+import java.security.PublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
+import javax.crypto.Cipher
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -62,11 +67,22 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun sendTokenToServer(token: String) {
-        updateStatus("Sending token to server...")
+        updateStatus("Encrypting and sending token to server...")
+        
+        // Encrypt the token before sending
+        val encryptedToken = try {
+            encryptToken(token)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to encrypt token", e)
+            updateStatus("Failed to encrypt token: ${e.message}")
+            registerButton.isEnabled = true
+            return
+        }
         
         val json = JSONObject()
-        json.put("token", token)
+        json.put("token", encryptedToken)
         json.put("platform", "android")
+        json.put("encrypted", true)
         
         val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         
@@ -130,5 +146,31 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error creating unsafe HTTP client", e)
             OkHttpClient()
         }
+    }
+    
+    private fun encryptToken(token: String): String {
+        val publicKey = loadPublicKey()
+        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        
+        val encryptedBytes = cipher.doFinal(token.toByteArray())
+        return Base64.getEncoder().encodeToString(encryptedBytes)
+    }
+    
+    private fun loadPublicKey(): PublicKey {
+        val publicKeyPem = assets.open("public_key.pem").bufferedReader().use { it.readText() }
+        
+        // Remove PEM headers and footers, and newlines
+        val publicKeyBase64 = publicKeyPem
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .replace("\n", "")
+            .replace("\r", "")
+        
+        val keyBytes = Base64.getDecoder().decode(publicKeyBase64)
+        val keySpec = X509EncodedKeySpec(keyBytes)
+        val keyFactory = KeyFactory.getInstance("RSA")
+        
+        return keyFactory.generatePublic(keySpec)
     }
 }

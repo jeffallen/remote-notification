@@ -10,11 +10,13 @@ Mobile App → App Backend (Port 8081) → Notification Backend (Port 8080) → 
 
 ## Privacy Design
 
-- **Token-Only Storage**: Only FCM device tokens stored, no user data
+- **Encrypted Token Storage**: Only encrypted FCM device tokens stored, no plaintext access
+- **Zero-Knowledge**: Cannot decrypt tokens - true privacy separation from user data
 - **RAM-Only**: All data lost on restart (no persistent storage)
 - **Separate Service**: Runs independently from user data systems
 - **Individual Notifications**: Each token sent separately to maintain isolation
 - **No User Association**: Tokens never linked to accounts or profiles
+- **End-to-End Encryption**: RSA-4096 encryption from client to notification backend
 
 ## Features
 
@@ -62,10 +64,15 @@ Visit http://localhost:8081 to see:
 
 #### Register Token
 ```bash
-curl -X POST http://localhost:8081/register \
+curl -k -X POST https://localhost:8443/register \
   -H "Content-Type: application/json" \
-  -d '{"token": "fcm-device-token", "platform": "android"}'
+  -d '{"token": "<encrypted-base64-token>", "platform": "android", "encrypted": true}'
 ```
+
+Note: 
+- The `-k` flag tells curl to ignore certificate errors
+- The token should be RSA-4096 encrypted and base64 encoded
+- App-backend cannot decrypt the token - it only stores and forwards it
 
 Response:
 ```json
@@ -73,6 +80,7 @@ Response:
   "success": true,
   "message": "Token registered successfully",
   "platform": "android",
+  "encryption": "encrypted",
   "total_tokens": 1
 }
 ```
@@ -110,10 +118,19 @@ const (
 
 ## Privacy Benefits
 
-- **Organizational Separation**: Different teams can operate each service
-- **Data Minimization**: Only tokens stored, no user context
-- **Audit Trail**: Clear separation makes compliance easier
-- **Individual Control**: Each notification sent separately
+- **Zero-Knowledge Architecture**: App-backend cannot decrypt tokens even if compromised
+- **Organizational Separation**: Different teams can operate each service with cryptographic separation
+- **Data Minimization**: Only encrypted tokens stored, no plaintext access
+- **Audit Trail**: Clear separation makes compliance easier to demonstrate
+- **Individual Control**: Each notification sent separately with end-to-end encryption
 - **Memory-Only**: No persistent storage of sensitive tokens
+- **Forward Secrecy**: Private key never leaves notification-backend environment
 
-This design allows the app backend organization to verifiably demonstrate that they handle only device tokens and cannot associate them with user identities or behaviors.
+### Encryption Architecture
+
+```
+Android App ──[RSA-4096]──> App Backend ──[encrypted]──> Notification Backend
+   (encrypt)                  (pass-through)              (decrypt + wipe)
+```
+
+This design allows the app backend organization to cryptographically prove they cannot access device tokens, providing the strongest possible privacy guarantees.

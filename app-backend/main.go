@@ -17,8 +17,9 @@ const (
 )
 
 type TokenRegistration struct {
-	Token    string `json:"token"`
-	Platform string `json:"platform"`
+	Token     string `json:"token"`
+	Platform  string `json:"platform"`
+	Encrypted bool   `json:"encrypted,omitempty"`
 }
 
 type NotificationRequest struct {
@@ -45,10 +46,14 @@ func (ts *TokenStore) AddToken(token string) {
 	defer ts.mu.Unlock()
 	ts.tokens[token] = time.Now()
 
-	// Safe token truncation for logging
-	tokenPreview := token
-	if len(token) > 20 {
-		tokenPreview = token[:20] + "..."
+	// Safe token truncation for logging (note: tokens are now encrypted)
+	tokenPreview := "[encrypted]"
+	if len(token) < 50 { // Only show preview if it looks like an unencrypted token
+		if len(token) > 20 {
+			tokenPreview = token[:20] + "..."
+		} else {
+			tokenPreview = token
+		}
 	}
 	log.Printf("Token stored: %s (total: %d)", tokenPreview, len(ts.tokens))
 }
@@ -112,8 +117,15 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store token in memory (privacy: no user data association)
+	// Store encrypted token in memory (privacy: no user data association, token is encrypted)
 	tokenStore.AddToken(reg.Token)
+
+	var encryptionStatus string
+	if reg.Encrypted {
+		encryptionStatus = "encrypted"
+	} else {
+		encryptionStatus = "plaintext"
+	}
 
 	// Forward to notification backend
 	if err := forwardTokenToBackend(reg); err != nil {
@@ -123,10 +135,11 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
-		"success":      true,
-		"message":      "Token registered successfully",
-		"platform":     reg.Platform,
-		"total_tokens": tokenStore.Count(),
+		"success":         true,
+		"message":         "Token registered successfully",
+		"platform":        reg.Platform,
+		"encryption":      encryptionStatus,
+		"total_tokens":    tokenStore.Count(),
 	}
 	json.NewEncoder(w).Encode(response)
 }

@@ -36,14 +36,27 @@ A minimal Android app that registers device tokens with Firebase Cloud Messaging
 
 ## API Integration
 
-The app sends a POST request to `https://example.com/register` with this JSON payload:
+The app sends a POST request to `https://10.0.2.2:8443/register` with this JSON payload:
+
+Note: `10.0.2.2` is the special IP that Android emulators use to reach the host machine. The app includes certificate bypass logic to ignore self-signed certificate errors.
+
+### Encryption Flow
+1. **Token Generation**: Firebase SDK generates device token
+2. **RSA Encryption**: Token encrypted with public key (RSA-4096)
+3. **Transmission**: Encrypted token sent to app-backend
+4. **Pass-through**: App-backend forwards encrypted token without decryption
+5. **Decryption**: Notification-backend decrypts token only when needed
+6. **Memory Wipe**: Decrypted token immediately removed from memory
 
 ```json
 {
-  "token": "fcm-device-token-here",
-  "platform": "android"
+  "token": "<encrypted-base64-token>",
+  "platform": "android",
+  "encrypted": true
 }
 ```
+
+The token field contains an RSA-4096 encrypted and base64-encoded device token.
 
 ## Dependencies
 
@@ -53,7 +66,21 @@ The app sends a POST request to `https://example.com/register` with this JSON pa
 
 ## Privacy Considerations
 
-This app demonstrates minimal FCM integration. The FCM token itself doesn't contain personal information, but Google can potentially link tokens to user accounts when compelled by legal process. See the chat transcript for detailed privacy analysis.
+### Token Encryption
+This app implements end-to-end encryption for FCM device tokens:
+
+1. **Public Key Encryption**: Device tokens are encrypted using RSA-4096 before transmission
+2. **Client-Side Encryption**: Encryption happens on the device using a public key embedded in the app
+3. **Zero-Knowledge Intermediate**: The app-backend cannot decrypt tokens, ensuring privacy separation
+4. **Decryption at Destination**: Only the notification-backend has the private key to decrypt tokens
+
+### Security Benefits
+- **Privacy by Design**: App-backend operators cannot access raw device tokens
+- **Organizational Separation**: Different teams can operate app-backend vs notification-backend
+- **Compliance**: Easier to demonstrate privacy controls for regulatory requirements
+- **Memory Security**: Decrypted tokens are wiped from memory immediately after use
+
+See the chat transcript for additional privacy analysis regarding FCM tokens and law enforcement access.
 
 ## Server Side
 

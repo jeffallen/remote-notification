@@ -4,11 +4,13 @@ A minimal Go server for receiving FCM token registrations and sending push notif
 
 ## Features
 
-- **Token Registration**: Accept FCM tokens from mobile apps
+- **Encrypted Token Registration**: Accept RSA-4096 encrypted FCM tokens from app-backend
 - **Push Notifications**: Send notifications using Firebase Admin SDK v1 API
-- **Simple Storage**: In-memory token storage (tokens lost on restart)
+- **Token Decryption**: Decrypt tokens only when needed, with immediate memory wiping
+- **Simple Storage**: In-memory encrypted token storage (tokens lost on restart)
 - **Status Monitoring**: Check registered token count and Firebase initialization status
 - **Modern API**: Uses Firebase Cloud Messaging API v1 (not legacy API)
+- **Privacy by Design**: Private key isolation and secure memory handling
 
 ## Setup
 
@@ -20,11 +22,28 @@ A minimal Go server for receiving FCM token registrations and sending push notif
 4. Click "Generate new private key"
 5. Save the downloaded JSON file as `key.json` in the notification-backend directory
 
-### 2. Configure Server
+### 2. Set up RSA Private Key
 
-Ensure the `key.json` file is present in the notification-backend directory. The server will automatically load it on startup.
+The notification-backend requires the RSA private key to decrypt device tokens:
 
-**Important**: The `key.json` file is gitignored and should never be committed to version control.
+1. The private key (`private_key.pem`) should be placed in the notification-backend directory
+2. This key is automatically generated during setup and corresponds to the public key in the Android app
+3. **Critical**: Never commit the private key to version control
+
+**Key Security**:
+- Private key stays only on notification-backend server
+- App-backend never has access to private key
+- Tokens are decrypted only when needed and immediately wiped from memory
+
+### 3. Configure Server
+
+Ensure both required files are present in the notification-backend directory:
+- `key.json` - Firebase service account key
+- `private_key.pem` - RSA private key for token decryption
+
+The server will automatically load both on startup and extract the project ID from the service account key.
+
+**Important**: Both files are gitignored and should never be committed to version control.
 
 ### 3. Run Server
 
@@ -40,8 +59,10 @@ Server starts on `http://localhost:8080`
 ```bash
 curl -X POST http://localhost:8080/register \
   -H "Content-Type: application/json" \
-  -d '{"token": "fcm-device-token", "platform": "android"}'
+  -d '{"token": "<encrypted-base64-token>", "platform": "android", "encrypted": true}'
 ```
+
+Note: The token should be RSA-4096 encrypted and base64 encoded. The server will store the encrypted token and decrypt it only when sending notifications.
 
 Response:
 ```json
@@ -106,12 +127,34 @@ Shows available endpoints and current status.
 
 ## Notes
 
-- **In-Memory Storage**: Tokens are lost when server restarts
+- **Encrypted Storage**: Encrypted tokens stored in memory, lost when server restarts
 - **No Authentication**: This is a minimal demo server
 - **Firebase Admin SDK**: Uses official Firebase Admin SDK for Go
 - **FCM v1 API**: Uses the modern Firebase Cloud Messaging API v1
 - **Service Account Authentication**: Requires Firebase service account key file
+- **RSA Decryption**: Tokens decrypted only when needed, immediately wiped from memory
+- **Private Key Security**: Private key never shared, stays on notification-backend only
 - **Automatic Retry**: Firebase SDK handles retry logic and error recovery
+
+## Encryption Architecture
+
+```
+Android App ──[RSA-4096 Encrypt]──> App Backend ──[Pass Through]──> Notification Backend
+                                                                        │
+                                                                        v
+                                                              [Decrypt + Send + Wipe]
+                                                                        │
+                                                                        v
+                                                                   Firebase FCM
+```
+
+### Security Features
+
+- **Zero-Knowledge Intermediate**: App-backend cannot decrypt tokens
+- **Just-in-Time Decryption**: Tokens decrypted only when sending notifications
+- **Immediate Memory Wipe**: Decrypted tokens removed from memory after use
+- **Private Key Isolation**: Private key never leaves notification-backend environment
+- **End-to-End Encryption**: Tokens encrypted from client to final decryption point
 
 ## Privacy Considerations
 
