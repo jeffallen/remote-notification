@@ -189,7 +189,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := template.Must(template.New("home").Parse(homeTemplate))
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	t.Execute(w, data)
 }
 
@@ -245,6 +245,7 @@ const homeTemplate = `
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>App Backend - Notification Service</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
