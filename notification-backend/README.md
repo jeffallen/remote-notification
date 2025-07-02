@@ -5,30 +5,26 @@ A minimal Go server for receiving FCM token registrations and sending push notif
 ## Features
 
 - **Token Registration**: Accept FCM tokens from mobile apps
-- **Push Notifications**: Send notifications to all registered devices
+- **Push Notifications**: Send notifications using Firebase Admin SDK v1 API
 - **Simple Storage**: In-memory token storage (tokens lost on restart)
-- **Status Monitoring**: Check registered token count and server config
+- **Status Monitoring**: Check registered token count and Firebase initialization status
+- **Modern API**: Uses Firebase Cloud Messaging API v1 (not legacy API)
 
 ## Setup
 
-### 1. Get FCM Server Key
+### 1. Get Firebase Service Account Key
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Select your project
-3. Go to Project Settings > Cloud Messaging tab
-4. Copy the "Server key" (Legacy server key)
+3. Go to Project Settings > Service Accounts tab
+4. Click "Generate new private key"
+5. Save the downloaded JSON file as `key.json` in the notification-backend directory
 
 ### 2. Configure Server
 
-Edit `main.go` and replace:
-```go
-serverKey = "YOUR_FCM_SERVER_KEY_HERE"
-```
+Ensure the `key.json` file is present in the notification-backend directory. The server will automatically load it on startup.
 
-With your actual FCM server key:
-```go
-serverKey = "AAAAxxx...:APA91bH..."
-```
+**Important**: The `key.json` file is gitignored and should never be committed to version control.
 
 ### 3. Run Server
 
@@ -84,7 +80,8 @@ Response:
 ```json
 {
   "registered_tokens": 1,
-  "server_key_configured": true
+  "firebase_initialized": true,
+  "api_version": "FCM v1 (Firebase Admin SDK)"
 }
 ```
 
@@ -111,9 +108,10 @@ Shows available endpoints and current status.
 
 - **In-Memory Storage**: Tokens are lost when server restarts
 - **No Authentication**: This is a minimal demo server
-- **Single-threaded**: Uses Go's default HTTP server (which is actually concurrent)
-- **Standard Library Only**: No external dependencies
-- **Legacy FCM API**: Uses the simpler legacy API instead of HTTP v1
+- **Firebase Admin SDK**: Uses official Firebase Admin SDK for Go
+- **FCM v1 API**: Uses the modern Firebase Cloud Messaging API v1
+- **Service Account Authentication**: Requires Firebase service account key file
+- **Automatic Retry**: Firebase SDK handles retry logic and error recovery
 
 ## Privacy Considerations
 

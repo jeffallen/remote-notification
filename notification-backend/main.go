@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/messaging"
+	"google.golang.org/api/option"
 )
 
 const (
-	fcmURL    = "https://fcm.googleapis.com/fcm/send"
-	serverKey = "YOUR_FCM_SERVER_KEY_HERE" // Replace with your actual FCM server key
+	serviceAccountKeyPath = "key.json"
 )
 
 type TokenRegistration struct {
@@ -21,10 +24,7 @@ type TokenRegistration struct {
 	Platform string `json:"platform"`
 }
 
-type FCMMessage struct {
-	To           string            `json:"to"`
-	Notification map[string]string `json:"notification"`
-}
+// FCMMessage struct removed - now using Firebase Admin SDK messaging.Message
 
 type NotificationRequest struct {
 	Title string `json:"title"`
@@ -78,9 +78,27 @@ func (ts *TokenStore) Count() int {
 	return len(ts.tokens)
 }
 
-var tokenStore = NewTokenStore()
+var (
+	tokenStore      = NewTokenStore()
+	messagingClient *messaging.Client
+)
 
 func main() {
+	// Initialize Firebase Admin SDK
+	ctx := context.Background()
+	opt := option.WithCredentialsFile(serviceAccountKeyPath)
+	app, err := firebase.NewApp(ctx, nil, opt)
+	if err != nil {
+		log.Fatalf("Error initializing Firebase app: %v", err)
+	}
+
+	messagingClient, err = app.Messaging(ctx)
+	if err != nil {
+		log.Fatalf("Error getting Messaging client: %v", err)
+	}
+
+	log.Printf("Firebase Admin SDK initialized successfully")
+
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send", handleSend)
 	http.HandleFunc("/notify", handleNotify)
@@ -96,7 +114,7 @@ func main() {
 	log.Printf("  GET  /status   - Show registered token count")
 	log.Printf("  GET  /         - Show this help")
 
-	if err := http.ListenAndServe(":" + port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
@@ -249,15 +267,16 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
-		"registered_tokens":     tokenStore.Count(),
-		"server_key_configured": serverKey != "YOUR_FCM_SERVER_KEY_HERE",
+		"registered_tokens":    tokenStore.Count(),
+		"firebase_initialized": messagingClient != nil,
+		"api_version":          "FCM v1 (Firebase Admin SDK)",
 	}
 	json.NewEncoder(w).Encode(response)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, `FCM Notification Server
+	fmt.Fprintf(w, `FCM Notification Server (v1 API)
 
 Endpoints:
   POST /register - Register FCM token
@@ -270,50 +289,37 @@ Endpoints:
     Body: {"token": "fcm-token", "title": "Hello", "body": "Test message"}
 
   GET /status - Show server status
-    Returns: {"registered_tokens": N, "server_key_configured": true/false}
+    Returns: {"registered_tokens": N, "firebase_initialized": true/false}
 
 Registered tokens: %d
-Server key configured: %v
-`, tokenStore.Count(), serverKey != "YOUR_FCM_SERVER_KEY_HERE")
+Firebase initialized: %v
+API Version: FCM v1 (Firebase Admin SDK)
+`, tokenStore.Count(), messagingClient != nil)
 }
 
 func sendFCMNotification(deviceToken, title, body string) error {
-	if serverKey == "YOUR_FCM_SERVER_KEY_HERE" {
-		return fmt.Errorf("FCM server key not configured")
+	if messagingClient == nil {
+		return fmt.Errorf("Firebase messaging client not initialized")
 	}
 
-	message := FCMMessage{
-		To: deviceToken,
-		Notification: map[string]string{
-			"title": title,
-			"body":  body,
+	// Create message using Firebase Admin SDK v1 API
+	message := &messaging.Message{
+		Token: deviceToken,
+		Notification: &messaging.Notification{
+			Title: title,
+			Body:  body,
+		},
+		Android: &messaging.AndroidConfig{
+			Priority: "high",
 		},
 	}
 
-	data, err := json.Marshal(message)
+	ctx := context.Background()
+	response, err := messagingClient.Send(ctx, message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal message: %v", err)
+		return fmt.Errorf("failed to send FCM message: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", fcmURL, bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Authorization", "key="+serverKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("FCM request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
+	log.Printf("Successfully sent message with ID: %s", response)
 	return nil
 }
