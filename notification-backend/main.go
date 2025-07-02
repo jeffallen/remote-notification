@@ -87,7 +87,9 @@ func main() {
 	// Initialize Firebase Admin SDK
 	ctx := context.Background()
 	opt := option.WithCredentialsFile(serviceAccountKeyPath)
-	app, err := firebase.NewApp(ctx, nil, opt)
+	app, err := firebase.NewApp(ctx, &firebase.Config{
+		ProjectID: "remote-notify-5b402",
+	}, opt)
 	if err != nil {
 		log.Fatalf("Error initializing Firebase app: %v", err)
 	}
