@@ -17,15 +17,14 @@ const (
 )
 
 type TokenRegistration struct {
-	Token     string `json:"token"`
-	Platform  string `json:"platform"`
-	Encrypted bool   `json:"encrypted,omitempty"`
+	EncryptedData string `json:"encrypted_data"`
+	Platform      string `json:"platform"`
 }
 
 type NotificationRequest struct {
-	Token string `json:"token"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
+	EncryptedData string `json:"encrypted_data"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // TokenStore holds device tokens in memory only
@@ -46,16 +45,8 @@ func (ts *TokenStore) AddToken(token string) {
 	defer ts.mu.Unlock()
 	ts.tokens[token] = time.Now()
 
-	// Safe token truncation for logging (note: tokens are now encrypted)
-	tokenPreview := "[encrypted]"
-	if len(token) < 50 { // Only show preview if it looks like an unencrypted token
-		if len(token) > 20 {
-			tokenPreview = token[:20] + "..."
-		} else {
-			tokenPreview = token
-		}
-	}
-	log.Printf("Token stored: %s (total: %d)", tokenPreview, len(ts.tokens))
+	// No token logging for privacy
+	log.Printf("Encrypted token stored (total: %d)", len(ts.tokens))
 }
 
 func (ts *TokenStore) GetTokens() []string {
@@ -112,34 +103,26 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reg.Token == "" {
-		http.Error(w, "Token is required", http.StatusBadRequest)
+	if reg.EncryptedData == "" {
+		http.Error(w, "Encrypted data is required", http.StatusBadRequest)
 		return
 	}
 
-	// Store encrypted token in memory (privacy: no user data association, token is encrypted)
-	tokenStore.AddToken(reg.Token)
-
-	var encryptionStatus string
-	if reg.Encrypted {
-		encryptionStatus = "encrypted"
-	} else {
-		encryptionStatus = "plaintext"
-	}
+	// Store encrypted token in memory (privacy: no user data association, always encrypted)
+	tokenStore.AddToken(reg.EncryptedData)
 
 	// Forward to notification backend
 	if err := forwardTokenToBackend(reg); err != nil {
-		log.Printf("Failed to forward token to backend: %v", err)
+		log.Printf("Failed to forward encrypted data to backend: %v", err)
 		// Still return success to app since we stored it
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
-		"success":         true,
-		"message":         "Token registered successfully",
-		"platform":        reg.Platform,
-		"encryption":      encryptionStatus,
-		"total_tokens":    tokenStore.Count(),
+		"success":      true,
+		"message":      "Encrypted token registered successfully",
+		"platform":     reg.Platform,
+		"total_tokens": tokenStore.Count(),
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -168,17 +151,13 @@ func handleSendAll(w http.ResponseWriter, r *http.Request) {
 	// Send individual notification for each token
 	for _, token := range tokens {
 		notifReq := NotificationRequest{
-			Token: token,
-			Title: "App Notification",
-			Body:  message,
+			EncryptedData: token,
+			Title:         "App Notification",
+			Body:          message,
 		}
 
 		if err := sendNotificationToBackend(notifReq); err != nil {
-			tokenPreview := token
-			if len(token) > 20 {
-				tokenPreview = token[:20] + "..."
-			}
-			log.Printf("Failed to send to token %s: %v", tokenPreview, err)
+			log.Printf("Failed to send to encrypted token: %v", err)
 			errorCount++
 		} else {
 			successCount++
@@ -229,11 +208,10 @@ func forwardTokenToBackend(reg TokenRegistration) error {
 
 func sendNotificationToBackend(notifReq NotificationRequest) error {
 	// Create the payload that notification-backend expects on /notify endpoint
-	// Note: We need to create this endpoint on notification-backend
 	payload := map[string]string{
-		"token": notifReq.Token,
-		"title": notifReq.Title,
-		"body":  notifReq.Body,
+		"encrypted_data": notifReq.EncryptedData,
+		"title":          notifReq.Title,
+		"body":           notifReq.Body,
 	}
 
 	data, err := json.Marshal(payload)

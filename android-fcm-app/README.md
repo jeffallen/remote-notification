@@ -40,23 +40,31 @@ The app sends a POST request to `https://10.0.2.2:8443/register` with this JSON 
 
 Note: `10.0.2.2` is the special IP that Android emulators use to reach the host machine. The app includes certificate bypass logic to ignore self-signed certificate errors.
 
-### Encryption Flow
+### Hybrid Encryption Flow
 1. **Token Generation**: Firebase SDK generates device token
-2. **RSA Encryption**: Token encrypted with public key (RSA-4096)
-3. **Transmission**: Encrypted token sent to app-backend
-4. **Pass-through**: App-backend forwards encrypted token without decryption
-5. **Decryption**: Notification-backend decrypts token only when needed
-6. **Memory Wipe**: Decrypted token immediately removed from memory
+2. **AES Key Generation**: Random AES-256 key generated per token
+3. **AEAD Encryption**: Token encrypted with AES-GCM (authenticated encryption)
+4. **Key Protection**: AES key encrypted with RSA-4096 public key
+5. **Data Packaging**: IV + encrypted AES key + encrypted token combined and base64-encoded
+6. **Transmission**: Encrypted package sent to app-backend
+7. **Zero-Knowledge Relay**: App-backend forwards without ability to decrypt
+8. **Hybrid Decryption**: Notification-backend decrypts AES key with RSA, then token with AES
+9. **Memory Wipe**: All keys and decrypted data immediately removed from memory
 
 ```json
 {
-  "token": "<encrypted-base64-token>",
-  "platform": "android",
-  "encrypted": true
+  "encrypted_data": "<hybrid-encrypted-base64-data>",
+  "platform": "android"
 }
 ```
 
-The token field contains an RSA-4096 encrypted and base64-encoded device token.
+The `encrypted_data` field contains:
+- 12-byte IV for AES-GCM
+- 4-byte length of encrypted AES key
+- RSA-4096 encrypted AES-256 key
+- AES-GCM encrypted FCM token with authentication tag
+
+All combined and base64-encoded for safe transport.
 
 ## Dependencies
 
@@ -75,10 +83,13 @@ This app implements end-to-end encryption for FCM device tokens:
 4. **Decryption at Destination**: Only the notification-backend has the private key to decrypt tokens
 
 ### Security Benefits
-- **Privacy by Design**: App-backend operators cannot access raw device tokens
-- **Organizational Separation**: Different teams can operate app-backend vs notification-backend
-- **Compliance**: Easier to demonstrate privacy controls for regulatory requirements
-- **Memory Security**: Decrypted tokens are wiped from memory immediately after use
+- **Hybrid Encryption**: Combines RSA security with AES performance
+- **Authenticated Encryption**: AES-GCM provides both confidentiality and authenticity
+- **Per-Token Keys**: Each token encrypted with unique AES key
+- **Forward Secrecy**: Compromise of one token doesn't affect others
+- **Zero-Knowledge Relay**: App-backend cryptographically cannot access tokens
+- **Memory Security**: All keys and decrypted data wiped immediately after use
+- **No Token Logging**: No plaintext tokens ever logged anywhere in the system
 
 See the chat transcript for additional privacy analysis regarding FCM tokens and law enforcement access.
 

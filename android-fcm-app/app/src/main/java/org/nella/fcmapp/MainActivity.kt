@@ -13,9 +13,13 @@ import java.io.IOException
 import java.security.cert.X509Certificate
 import java.security.KeyFactory
 import java.security.PublicKey
+import java.security.SecureRandom
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -80,9 +84,8 @@ class MainActivity : AppCompatActivity() {
         }
         
         val json = JSONObject()
-        json.put("token", encryptedToken)
+        json.put("encrypted_data", encryptedToken)
         json.put("platform", "android")
-        json.put("encrypted", true)
         
         val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         
@@ -106,7 +109,7 @@ class MainActivity : AppCompatActivity() {
                 
                 runOnUiThread {
                     if (response.isSuccessful) {
-                        updateStatus("Token registered successfully!\nToken: ${token.take(20)}...")
+                        updateStatus("Encrypted token registered successfully!")
                     } else {
                         updateStatus("Server error: ${response.code}\n$responseBody")
                     }
@@ -149,12 +152,35 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun encryptToken(token: String): String {
-        val publicKey = loadPublicKey()
-        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        // Generate a random AES-256 key for this token
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        val aesKey = keyGen.generateKey()
         
-        val encryptedBytes = cipher.doFinal(token.toByteArray())
-        return Base64.getEncoder().encodeToString(encryptedBytes)
+        // Encrypt the token with AES-GCM
+        val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val iv = ByteArray(12) // 96-bit IV for GCM
+        SecureRandom().nextBytes(iv)
+        val gcmSpec = GCMParameterSpec(128, iv) // 128-bit authentication tag
+        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey, gcmSpec)
+        
+        val encryptedToken = aesCipher.doFinal(token.toByteArray())
+        
+        // Encrypt the AES key with RSA
+        val publicKey = loadPublicKey()
+        val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        rsaCipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        val encryptedAesKey = rsaCipher.doFinal(aesKey.encoded)
+        
+        // Combine: IV (12 bytes) + encrypted AES key length (4 bytes) + encrypted AES key + encrypted token
+        val keyLengthBytes = ByteArray(4)
+        keyLengthBytes[0] = (encryptedAesKey.size shr 24).toByte()
+        keyLengthBytes[1] = (encryptedAesKey.size shr 16).toByte()
+        keyLengthBytes[2] = (encryptedAesKey.size shr 8).toByte()
+        keyLengthBytes[3] = encryptedAesKey.size.toByte()
+        
+        val combined = iv + keyLengthBytes + encryptedAesKey + encryptedToken
+        return Base64.getEncoder().encodeToString(combined)
     }
     
     private fun loadPublicKey(): PublicKey {

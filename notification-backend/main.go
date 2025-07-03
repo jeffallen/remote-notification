@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -13,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,8 +33,8 @@ type ServiceAccountKey struct {
 }
 
 type TokenRegistration struct {
-	Token    string `json:"token"`
-	Platform string `json:"platform"`
+	EncryptedData string `json:"encrypted_data"`
+	Platform      string `json:"platform"`
 }
 
 // FCMMessage struct removed - now using Firebase Admin SDK messaging.Message
@@ -44,9 +45,9 @@ type NotificationRequest struct {
 }
 
 type SingleNotificationRequest struct {
-	Token string `json:"token"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
+	EncryptedData string `json:"encrypted_data"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // Simple in-memory token storage
@@ -167,12 +168,12 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reg.Token == "" {
-		http.Error(w, "Token is required", http.StatusBadRequest)
+	if reg.EncryptedData == "" {
+		http.Error(w, "Encrypted data is required", http.StatusBadRequest)
 		return
 	}
 
-	tokenStore.AddToken(reg.Token)
+	tokenStore.AddToken(reg.EncryptedData)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
@@ -262,17 +263,13 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if notif.Token == "" || notif.Title == "" || notif.Body == "" {
-		http.Error(w, "Token, title and body are required", http.StatusBadRequest)
+	if notif.EncryptedData == "" || notif.Title == "" || notif.Body == "" {
+		http.Error(w, "Encrypted data, title and body are required", http.StatusBadRequest)
 		return
 	}
 
-	if err := sendFCMNotification(notif.Token, notif.Title, notif.Body); err != nil {
-		tokenPreview := notif.Token
-		if len(notif.Token) > 20 {
-			tokenPreview = notif.Token[:20] + "..."
-		}
-		log.Printf("Failed to send to token %s: %v", tokenPreview, err)
+	if err := sendFCMNotification(notif.EncryptedData, notif.Title, notif.Body); err != nil {
+		log.Printf("Failed to send notification: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		response := map[string]interface{}{
@@ -325,21 +322,15 @@ API Version: FCM v1 (Firebase Admin SDK)
 `, tokenStore.Count(), messagingClient != nil)
 }
 
-func sendFCMNotification(deviceToken, title, body string) error {
+func sendFCMNotification(encryptedData, title, body string) error {
 	if messagingClient == nil {
 		return fmt.Errorf("Firebase messaging client not initialized")
 	}
 
-	// Decrypt token if it appears to be encrypted (base64 encoded and long)
-	decryptedToken := deviceToken
-	if len(deviceToken) > 100 && !strings.Contains(deviceToken, ":") {
-		// Looks like an encrypted token, try to decrypt
-		var err error
-		decryptedToken, err = decryptToken(deviceToken)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt token: %v", err)
-		}
-		log.Printf("Decrypted token for FCM sending")
+	// Decrypt the token using hybrid decryption
+	decryptedToken, err := decryptHybridToken(encryptedData)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt token: %v", err)
 	}
 
 	// Create message using Firebase Admin SDK v1 API
@@ -406,19 +397,54 @@ func loadPrivateKey(keyPath string) (*rsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-func decryptToken(encryptedToken string) (string, error) {
+func decryptHybridToken(encryptedData string) (string, error) {
 	if privateKey == nil {
 		return "", fmt.Errorf("private key not loaded")
 	}
 
 	// Decode base64
-	encryptedBytes, err := base64.StdEncoding.DecodeString(encryptedToken)
+	combinedBytes, err := base64.StdEncoding.DecodeString(encryptedData)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %v", err)
 	}
 
-	// Decrypt
-	decryptedBytes, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, encryptedBytes)
+	if len(combinedBytes) < 16 { // At least IV (12) + key length (4)
+		return "", fmt.Errorf("encrypted data too short")
+	}
+
+	// Extract components: IV (12 bytes) + key length (4 bytes) + encrypted AES key + encrypted token
+	iv := combinedBytes[:12]
+	keyLengthBytes := combinedBytes[12:16]
+	keyLength := int(keyLengthBytes[0])<<24 | int(keyLengthBytes[1])<<16 | int(keyLengthBytes[2])<<8 | int(keyLengthBytes[3])
+
+	if len(combinedBytes) < 16+keyLength {
+		return "", fmt.Errorf("encrypted data malformed")
+	}
+
+	encryptedAesKey := combinedBytes[16 : 16+keyLength]
+	encryptedToken := combinedBytes[16+keyLength:]
+
+	// Decrypt AES key with RSA
+	aesKeyBytes, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, encryptedAesKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt AES key: %v", err)
+	}
+	defer secureWipeBytes(aesKeyBytes) // Wipe AES key from memory
+
+	// Create AES cipher
+	block, err := aes.NewCipher(aesKeyBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	// Decrypt token
+	decryptedBytes, err := gcm.Open(nil, iv, encryptedToken, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt token: %v", err)
 	}
@@ -435,5 +461,12 @@ func secureWipeString(s *string) {
 			_ = i
 		}
 		*s = ""
+	}
+}
+
+func secureWipeBytes(b []byte) {
+	// Overwrite byte slice in memory
+	for i := range b {
+		b[i] = 0
 	}
 }

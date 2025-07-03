@@ -16,7 +16,7 @@ Mobile App → App Backend (Port 8081) → Notification Backend (Port 8080) → 
 - **Separate Service**: Runs independently from user data systems
 - **Individual Notifications**: Each token sent separately to maintain isolation
 - **No User Association**: Tokens never linked to accounts or profiles
-- **End-to-End Encryption**: RSA-4096 encryption from client to notification backend
+- **Hybrid Encryption**: AES-GCM with RSA-protected keys from client to notification backend
 
 ## Features
 
@@ -66,21 +66,20 @@ Visit http://localhost:8081 to see:
 ```bash
 curl -k -X POST https://localhost:8443/register \
   -H "Content-Type: application/json" \
-  -d '{"token": "<encrypted-base64-token>", "platform": "android", "encrypted": true}'
+  -d '{"encrypted_data": "<hybrid-encrypted-base64>", "platform": "android"}'
 ```
 
 Note: 
 - The `-k` flag tells curl to ignore certificate errors
-- The token should be RSA-4096 encrypted and base64 encoded
-- App-backend cannot decrypt the token - it only stores and forwards it
+- The `encrypted_data` contains hybrid-encrypted token (AES-GCM + RSA)
+- App-backend cannot decrypt any part of the data - true zero-knowledge
 
 Response:
 ```json
 {
   "success": true,
-  "message": "Token registered successfully",
+  "message": "Encrypted token registered successfully",
   "platform": "android",
-  "encryption": "encrypted",
   "total_tokens": 1
 }
 ```
@@ -129,8 +128,8 @@ const (
 ### Encryption Architecture
 
 ```
-Android App ──[RSA-4096]──> App Backend ──[encrypted]──> Notification Backend
-   (encrypt)                  (pass-through)              (decrypt + wipe)
+Android App ──[AES-GCM+RSA]──> App Backend ──[encrypted]──> Notification Backend
+   (hybrid encrypt)            (pass-through)              (hybrid decrypt + wipe)
 ```
 
 This design allows the app backend organization to cryptographically prove they cannot access device tokens, providing the strongest possible privacy guarantees.

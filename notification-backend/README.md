@@ -4,9 +4,9 @@ A minimal Go server for receiving FCM token registrations and sending push notif
 
 ## Features
 
-- **Encrypted Token Registration**: Accept RSA-4096 encrypted FCM tokens from app-backend
+- **Hybrid Encrypted Tokens**: Accept AES-GCM + RSA encrypted FCM tokens from app-backend
 - **Push Notifications**: Send notifications using Firebase Admin SDK v1 API
-- **Token Decryption**: Decrypt tokens only when needed, with immediate memory wiping
+- **Hybrid Decryption**: Decrypt AES keys with RSA, then tokens with AES-GCM
 - **Simple Storage**: In-memory encrypted token storage (tokens lost on restart)
 - **Status Monitoring**: Check registered token count and Firebase initialization status
 - **Modern API**: Uses Firebase Cloud Messaging API v1 (not legacy API)
@@ -59,10 +59,10 @@ Server starts on `http://localhost:8080`
 ```bash
 curl -X POST http://localhost:8080/register \
   -H "Content-Type: application/json" \
-  -d '{"token": "<encrypted-base64-token>", "platform": "android", "encrypted": true}'
+  -d '{"encrypted_data": "<hybrid-encrypted-base64>", "platform": "android"}'
 ```
 
-Note: The token should be RSA-4096 encrypted and base64 encoded. The server will store the encrypted token and decrypt it only when sending notifications.
+Note: The `encrypted_data` contains hybrid-encrypted token (AES-GCM with RSA-protected key). The server stores encrypted data and performs hybrid decryption only when sending notifications.
 
 Response:
 ```json
@@ -139,13 +139,13 @@ Shows available endpoints and current status.
 ## Encryption Architecture
 
 ```
-Android App ──[RSA-4096 Encrypt]──> App Backend ──[Pass Through]──> Notification Backend
-                                                                        │
-                                                                        v
-                                                              [Decrypt + Send + Wipe]
-                                                                        │
-                                                                        v
-                                                                   Firebase FCM
+Android App ──[Hybrid Encrypt]──> App Backend ──[Pass Through]──> Notification Backend
+                                                                         │
+                                                                         v
+                                                               [Hybrid Decrypt + Send + Wipe]
+                                                                         │
+                                                                         v
+                                                                    Firebase FCM
 ```
 
 ### Security Features
@@ -154,7 +154,9 @@ Android App ──[RSA-4096 Encrypt]──> App Backend ──[Pass Through]─�
 - **Just-in-Time Decryption**: Tokens decrypted only when sending notifications
 - **Immediate Memory Wipe**: Decrypted tokens removed from memory after use
 - **Private Key Isolation**: Private key never leaves notification-backend environment
-- **End-to-End Encryption**: Tokens encrypted from client to final decryption point
+- **Hybrid Encryption**: AES-GCM for performance, RSA for key protection
+- **AEAD Security**: Authenticated encryption prevents tampering
+- **Per-Token Keys**: Each token encrypted with unique AES key
 
 ## Privacy Considerations
 

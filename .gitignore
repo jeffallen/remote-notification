@@ -36,3 +36,6 @@ key.json
 private_key.pem
 *private*.pem
 *.key
+
+# AES keys
+aes_key.txt
