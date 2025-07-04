@@ -37,7 +37,6 @@ jobs:
         go test -v -run TestEncryption
 
   build-android:
-    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -51,7 +50,7 @@ jobs:
         cd demo-app
         ./gradlew test
 
-  lint-and-security:
+  go-lint:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
