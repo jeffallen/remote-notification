@@ -232,6 +232,7 @@ func TestMalformedEncryptedData(t *testing.T) {
 		{"Too short", base64.StdEncoding.EncodeToString([]byte("short"))},
 		{"Only IV", base64.StdEncoding.EncodeToString(make([]byte, 12))},
 		{"IV + malformed key length", base64.StdEncoding.EncodeToString(append(make([]byte, 12), 0xFF, 0xFF, 0xFF, 0xFF))},
+		{"IV + wrong RSA key size", base64.StdEncoding.EncodeToString(append(make([]byte, 12), 0x00, 0x00, 0x01, 0x00))}, // 256 bytes instead of expected RSA size
 	}
 
 	for _, tc := range malformedTests {
@@ -264,6 +265,62 @@ func TestSecureMemoryWiping(t *testing.T) {
 	for i, b := range testBytes {
 		if b != 0 {
 			t.Errorf("Byte wiping failed at position %d: expected 0, got %d", i, b)
+		}
+	}
+}
+
+// Test RSA key size validation
+func TestRSAKeySizeValidation(t *testing.T) {
+	// Generate test key pair
+	privKey, pubKey := generateTestRSAKeyPair(t)
+
+	// Set global private key for decryption function
+	originalPrivateKey := privateKey
+	privateKey = privKey
+	defer func() { privateKey = originalPrivateKey }()
+
+	testToken := "test_token_for_key_size_validation"
+
+	// Encrypt with correct key
+	encrypted, err := encryptTokenHybrid(testToken, pubKey)
+	if err != nil {
+		t.Fatalf("Encryption failed: %v", err)
+	}
+
+	// Verify original decryption works
+	decrypted, err := decryptHybridToken(encrypted)
+	if err != nil {
+		t.Fatalf("Original decryption failed: %v", err)
+	}
+	if decrypted != testToken {
+		t.Fatalf("Original decryption incorrect: expected %q, got %q", testToken, decrypted)
+	}
+
+	// Now corrupt the key length to simulate wrong RSA key size
+	data, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		t.Fatalf("Failed to decode encrypted data: %v", err)
+	}
+
+	// Change the key length to an invalid size (original + 1)
+	originalKeyLength := int(data[12])<<24 | int(data[13])<<16 | int(data[14])<<8 | int(data[15])
+	invalidKeyLength := originalKeyLength + 1
+	data[12] = byte(invalidKeyLength >> 24)
+	data[13] = byte(invalidKeyLength >> 16)
+	data[14] = byte(invalidKeyLength >> 8)
+	data[15] = byte(invalidKeyLength)
+
+	corruptedEncrypted := base64.StdEncoding.EncodeToString(data)
+
+	// Attempt decryption - should fail with key size error
+	_, err = decryptHybridToken(corruptedEncrypted)
+	if err == nil {
+		t.Error("Expected decryption to fail with invalid key size, but it succeeded")
+	} else {
+		if !strings.Contains(err.Error(), "invalid encrypted AES key size") {
+			t.Errorf("Expected key size validation error, got: %v", err)
+		} else {
+			t.Logf("Correctly rejected invalid key size: %v", err)
 		}
 	}
 }

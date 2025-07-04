@@ -417,6 +417,12 @@ func decryptHybridToken(encryptedData string) (string, error) {
 	keyLengthBytes := combinedBytes[12:16]
 	keyLength := int(keyLengthBytes[0])<<24 | int(keyLengthBytes[1])<<16 | int(keyLengthBytes[2])<<8 | int(keyLengthBytes[3])
 
+	// Validate RSA key size - encrypted AES key must match RSA key size
+	expectedKeySize := privateKey.Size() // RSA key size in bytes
+	if keyLength != expectedKeySize {
+		return "", fmt.Errorf("invalid encrypted AES key size: expected %d bytes (RSA-%d), got %d bytes", expectedKeySize, privateKey.Size()*8, keyLength)
+	}
+
 	if len(combinedBytes) < 16+keyLength {
 		return "", fmt.Errorf("encrypted data malformed")
 	}
