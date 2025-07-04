@@ -4,3 +4,5 @@ app/build/
 app/google-services.json
 build/
 local.properties
+gradle/
+gradlew
