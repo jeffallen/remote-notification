@@ -137,7 +137,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		"platform":     reg.Platform,
 		"total_tokens": tokenStore.Count(),
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleSendAll(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +198,9 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 
 	t := template.Must(template.New("home").Parse(homeTemplate))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	t.Execute(w, data)
+	if err := t.Execute(w, data); err != nil {
+		log.Printf("Error executing template: %v", err)
+	}
 }
 
 func forwardTokenToBackend(reg TokenRegistration) error {
@@ -209,7 +213,11 @@ func forwardTokenToBackend(reg TokenRegistration) error {
 	if err != nil {
 		return fmt.Errorf("failed to post to backend: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -236,7 +244,11 @@ func sendNotificationToBackend(notifReq NotificationRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to post to backend: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

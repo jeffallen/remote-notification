@@ -225,7 +225,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		"platform":     reg.Platform,
 		"total_tokens": tokenStore.Count(),
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleSend(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +285,9 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		"error_count":  errorCount,
 		"total_tokens": len(tokens),
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleNotify(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +334,9 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 			"message": "Failed to send notification",
 			"error":   err.Error(),
 		}
-		json.NewEncoder(w).Encode(response)
+		if encodeErr := json.NewEncoder(w).Encode(response); encodeErr != nil {
+			log.Printf("Error encoding error response: %v", encodeErr)
+		}
 		return
 	}
 
@@ -339,7 +345,9 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Notification sent successfully",
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -349,22 +357,28 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		"firebase_initialized": messagingClient != nil,
 		"api_version":          "FCM v1 (Firebase Admin SDK)",
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, `FCM Notification Server (v1 API)
+	if _, err := fmt.Fprintf(w, `FCM Notification Server (v1 API)
 
 Endpoints:
   POST /register - Register FCM token
-    Body: {"token": "fcm-token", "platform": "android"}
+    Body: {"encrypted_data": "base64-encrypted-token", "platform": "android"}
 
   POST /send - Send notification to all registered tokens
     Body: {"title": "Hello", "body": "Test message"}
 
   POST /notify - Send notification to specific token
-    Body: {"token": "fcm-token", "title": "Hello", "body": "Test message"}
+    Body: {"encrypted_data": "base64-encrypted-token", "title": "Hello", "body": "Test message"}
+
+  POST /validate - Validate encrypted token without storing
+    Body: {"encrypted_data": "base64-encrypted-token", "platform": "android"}
+    Returns: {"valid": true/false, "message": "reason"}
 
   GET /status - Show server status
     Returns: {"registered_tokens": N, "firebase_initialized": true/false}
@@ -372,12 +386,14 @@ Endpoints:
 Registered tokens: %d
 Firebase initialized: %v
 API Version: FCM v1 (Firebase Admin SDK)
-`, tokenStore.Count(), messagingClient != nil)
+`, tokenStore.Count(), messagingClient != nil); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
 }
 
 func sendFCMNotification(encryptedData, title, body string) error {
 	if messagingClient == nil {
-		return fmt.Errorf("Firebase messaging client not initialized")
+		return fmt.Errorf("firebase messaging client not initialized")
 	}
 
 	// Decrypt the token using hybrid decryption
