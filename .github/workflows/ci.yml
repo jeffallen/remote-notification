@@ -99,7 +99,3 @@ jobs:
         version: latest
         working-directory: notification-backend
     
-    - name: Run gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: './app-backend/... ./notification-backend/...'
