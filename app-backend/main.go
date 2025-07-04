@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -12,8 +13,13 @@ import (
 	"time"
 )
 
-const (
-	notificationBackendURL = "http://192.168.1.141:8080"
+var (
+	// Command-line configuration
+	port                   = flag.String("port", "8443", "Port to listen on")
+	certFile               = flag.String("cert", "cert.pem", "Path to TLS certificate file")
+	keyFile                = flag.String("key", "key.pem", "Path to TLS private key file")
+	notificationBackendURL = flag.String("backend-url", "http://localhost:8080", "URL of the notification backend service")
+	version                = "dev" // Set by build flags
 )
 
 type TokenRegistration struct {
@@ -68,17 +74,24 @@ func (ts *TokenStore) Count() int {
 var tokenStore = NewTokenStore()
 
 func main() {
+	flag.Parse()
+
+	log.Printf("App Backend Server v%s", version)
+	log.Printf("Configuration:")
+	log.Printf("  Port: %s", *port)
+	log.Printf("  TLS Cert: %s", *certFile)
+	log.Printf("  TLS Key: %s", *keyFile)
+	log.Printf("  Backend URL: %s", *notificationBackendURL)
+
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send-all", handleSendAll)
 	http.HandleFunc("/", handleHome)
 
-	port := "8443"
-	log.Printf("App Backend Server starting on HTTPS port %s", port)
-	log.Printf("Forwarding to notification backend: %s", notificationBackendURL)
-	log.Printf("Web interface available at: https://localhost:%s", port)
-	log.Printf("Android emulator can access at: https://10.0.2.2:%s/", port)
+	log.Printf("App Backend Server starting on HTTPS port %s", *port)
+	log.Printf("Web interface available at: https://localhost:%s", *port)
+	log.Printf("Android emulator can access at: https://10.0.2.2:%s/", *port)
 
-	if err := http.ListenAndServeTLS(":"+port, "cert.pem", "key.pem", nil); err != nil {
+	if err := http.ListenAndServeTLS(":"+*port, *certFile, *keyFile, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
@@ -192,7 +205,7 @@ func forwardTokenToBackend(reg TokenRegistration) error {
 		return fmt.Errorf("failed to marshal token: %v", err)
 	}
 
-	resp, err := http.Post(notificationBackendURL+"/register", "application/json", bytes.NewBuffer(data))
+	resp, err := http.Post(*notificationBackendURL+"/register", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return fmt.Errorf("failed to post to backend: %v", err)
 	}
@@ -219,7 +232,7 @@ func sendNotificationToBackend(notifReq NotificationRequest) error {
 		return fmt.Errorf("failed to marshal notification: %v", err)
 	}
 
-	resp, err := http.Post(notificationBackendURL+"/notify", "application/json", bytes.NewBuffer(data))
+	resp, err := http.Post(*notificationBackendURL+"/notify", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return fmt.Errorf("failed to post to backend: %v", err)
 	}

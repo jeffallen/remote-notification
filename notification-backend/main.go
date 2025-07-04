@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -23,9 +24,12 @@ import (
 	"google.golang.org/api/option"
 )
 
-const (
-	serviceAccountKeyPath = "key.json"
-	privateKeyPath        = "private_key.pem"
+var (
+	// Command-line configuration
+	port                  = flag.String("port", "8080", "Port to listen on")
+	serviceAccountKeyPath = flag.String("firebase-key", "key.json", "Path to Firebase service account key file")
+	privateKeyPath        = flag.String("private-key", "private_key.pem", "Path to RSA private key file")
+	version               = "dev" // Set by build flags
 )
 
 type ServiceAccountKey struct {
@@ -98,15 +102,23 @@ var (
 )
 
 func main() {
+	flag.Parse()
+
+	log.Printf("Notification Backend Server v%s", version)
+	log.Printf("Configuration:")
+	log.Printf("  Port: %s", *port)
+	log.Printf("  Firebase Key: %s", *serviceAccountKeyPath)
+	log.Printf("  Private Key: %s", *privateKeyPath)
+
 	// Read project ID from service account key
-	projectID, err := readProjectIDFromKey(serviceAccountKeyPath)
+	projectID, err := readProjectIDFromKey(*serviceAccountKeyPath)
 	if err != nil {
 		log.Fatalf("Error reading project ID from key file: %v", err)
 	}
 
 	// Initialize Firebase Admin SDK
 	ctx := context.Background()
-	opt := option.WithCredentialsFile(serviceAccountKeyPath)
+	opt := option.WithCredentialsFile(*serviceAccountKeyPath)
 	app, err := firebase.NewApp(ctx, &firebase.Config{
 		ProjectID: projectID,
 	}, opt)
@@ -122,7 +134,7 @@ func main() {
 	log.Printf("Firebase Admin SDK initialized successfully")
 
 	// Load RSA private key for token decryption
-	privateKey, err = loadPrivateKey(privateKeyPath)
+	privateKey, err = loadPrivateKey(*privateKeyPath)
 	if err != nil {
 		log.Fatalf("Error loading private key: %v", err)
 	}
@@ -134,8 +146,7 @@ func main() {
 	http.HandleFunc("/status", handleStatus)
 	http.HandleFunc("/", handleRoot)
 
-	port := "8080"
-	log.Printf("FCM Notification Server starting on port %s", port)
+	log.Printf("FCM Notification Server starting on port %s", *port)
 	log.Printf("Endpoints:")
 	log.Printf("  POST /register - Register FCM token")
 	log.Printf("  POST /send     - Send notification to all registered tokens")
@@ -143,7 +154,7 @@ func main() {
 	log.Printf("  GET  /status   - Show registered token count")
 	log.Printf("  GET  /         - Show this help")
 
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+*port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
