@@ -3,7 +3,8 @@
 app/build/
 app/google-services.json
 build/
-gradle/
-gradlew
-gradlew.bat
+# Exclude gradle wrapper files from ignore
+# gradle/
+# gradlew
+# gradlew.bat
 local.properties

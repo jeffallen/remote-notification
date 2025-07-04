@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers on tags like v1.0.0, v1.2.3, etc.
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 34
+        build-tools: '34.0.0'
+        ndk-version: '25.1.8937393'
+    
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+      with:
+        gradle-version: 8.4
+    
+    - name: Build Release APK
+      run: |
+        cd android-fcm-app
+        gradle assembleRelease
+    
+    - name: Sign APK (if keystore secrets are available)
+      if: ${{ env.KEYSTORE_BASE64 != '' }}
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        cd android-fcm-app
+        # Decode keystore from base64
+        echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
+        
+        # Sign the APK
+        $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+          --ks release-keystore.jks \
+          --ks-pass pass:"$KEYSTORE_PASSWORD" \
+          --key-pass pass:"$KEY_PASSWORD" \
+          --ks-key-alias "$KEY_ALIAS" \
+          app/build/outputs/apk/release/app-release-unsigned.apk
+        
+        # Rename signed APK
+        mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/app-release-signed.apk
+        
+        # Clean up keystore
+        rm release-keystore.jks
+    
+    - name: Rename APK with version
+      run: |
+        cd android-fcm-app/app/build/outputs/apk/release
+        VERSION=${GITHUB_REF#refs/tags/}
+        if [ -f "app-release-signed.apk" ]; then
+          mv app-release-signed.apk "minnotif-android-${VERSION}-signed.apk"
+          echo "APK_NAME=minnotif-android-${VERSION}-signed.apk" >> $GITHUB_ENV
+        else
+          mv app-release-unsigned.apk "minnotif-android-${VERSION}-unsigned.apk"
+          echo "APK_NAME=minnotif-android-${VERSION}-unsigned.apk" >> $GITHUB_ENV
+        fi
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: android-fcm-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## 📱 Android APK Release ${{ github.ref_name }}
+          
+          **Download and install:**
+          1. Download the APK file below
+          2. Enable "Install from unknown sources" in Android settings
+          3. Open the APK file to install
+          
+          **Security Notes:**
+          - This APK uses hybrid encryption (AES-256-GCM + RSA-4096)
+          - FCM tokens are encrypted before transmission
+          - App-backend cannot decrypt stored tokens
+          
+          **Files:**
+          - `${{ env.APK_NAME }}` - Android application package
+          
+          ---
+          
+          **Deployment checklist:**
+          - [ ] Update backend server URLs if needed
+          - [ ] Deploy Go servers with `make install`
+          - [ ] Configure Firebase service account
+          - [ ] Generate production RSA keypair
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload APK as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: android-apk-${{ github.ref_name }}
+        path: android-fcm-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
+        retention-days: 90
+
+  build-go-binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build Go binaries
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        
+        # Build app-backend
+        cd app-backend
+        go build -ldflags "-X main.version=${VERSION}" -o ../bin/app-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
+        
+        # Build notification-backend  
+        cd ../notification-backend
+        go build -ldflags "-X main.version=${VERSION}" -o ../bin/notification-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
+    
+    - name: Upload Go binaries
+      uses: actions/upload-artifact@v3
+      with:
+        name: go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: bin/*
+        retention-days: 90
+
+  upload-go-binaries:
+    needs: build-go-binaries
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts
+    
+    - name: Prepare binaries for release
+      run: |
+        mkdir -p release-binaries
+        find artifacts -name "go-binaries-*" -type d | while read dir; do
+          cp "$dir"/* release-binaries/ 2>/dev/null || true
+        done
+        ls -la release-binaries/
+    
+    - name: Upload Go binaries to release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-binaries/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
