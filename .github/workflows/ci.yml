@@ -37,18 +37,24 @@ jobs:
         go test -v -run TestEncryption
 
   build-android:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build Android App
-      uses: sparkfabrik/android-build-action@v1.5.0
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
       with:
-        project-path: demo-app
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Build demo-app
+      run: ./gradlew -p demo-app --no-daemon build
     
     - name: Run Android unit tests
-      run: |
-        cd demo-app
-        ./gradlew test
+      run: ./gradlew -p demo-app test
 
   go-lint:
     runs-on: ubuntu-latest
