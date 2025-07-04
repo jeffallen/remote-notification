@@ -83,8 +83,8 @@ func TestHybridEncryptionRoundTrip(t *testing.T) {
 	testTokens := []string{
 		"simple_token",
 		"token_with_special_chars_!@#$%^&*()",
-		"very_long_token_" + strings.Repeat("x", 1000),
-		"", // empty token
+		"long_token_" + strings.Repeat("x", 200), // Realistic FCM token length
+		"a", // minimal token
 	}
 
 	for _, token := range testTokens {
@@ -322,6 +322,127 @@ func TestRSAKeySizeValidation(t *testing.T) {
 		} else {
 			t.Logf("Correctly rejected invalid key size: %v", err)
 		}
+	}
+}
+
+// Test input validation limits
+func TestInputValidationLimits(t *testing.T) {
+	// Generate test key pair
+	privKey, pubKey := generateTestRSAKeyPair(t)
+
+	// Set global private key for decryption function
+	originalPrivateKey := privateKey
+	privateKey = privKey
+	defer func() { privateKey = originalPrivateKey }()
+
+	// Test valid token first
+	validToken := "valid_test_token"
+	validEncrypted, err := encryptTokenHybrid(validToken, pubKey)
+	if err != nil {
+		t.Fatalf("Failed to encrypt valid token: %v", err)
+	}
+
+	// Verify valid token works
+	decrypted, err := decryptHybridToken(validEncrypted)
+	if err != nil {
+		t.Fatalf("Valid token should decrypt: %v", err)
+	}
+	if decrypted != validToken {
+		t.Fatalf("Valid token mismatch: expected %q, got %q", validToken, decrypted)
+	}
+
+	// Test size limits
+	testCases := []struct {
+		name string
+		data string
+		expectedError string
+	}{
+		{"Too short", strings.Repeat("a", 50), "too short"},
+		{"Valid minimum", strings.Repeat("a", 100), ""},  // Should pass size check but fail decryption
+		{"Valid length", validEncrypted, ""},  // Should pass completely
+		{"Too long", strings.Repeat("a", 10001), "too long"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decryptHybridToken(tc.data)
+			
+			if tc.expectedError == "" {
+				// Should either succeed or fail for other reasons (not size)
+				if err != nil && (strings.Contains(err.Error(), "too short") || strings.Contains(err.Error(), "too long")) {
+					t.Errorf("Unexpected size error for %s: %v", tc.name, err)
+				}
+			} else {
+				// Should fail with size error
+				if err == nil {
+					t.Errorf("Expected %s error for %s, but succeeded", tc.expectedError, tc.name)
+				} else if !strings.Contains(err.Error(), tc.expectedError) {
+					t.Errorf("Expected %s error for %s, got: %v", tc.expectedError, tc.name, err)
+				}
+			}
+		})
+	}
+}
+
+// Test extreme token length validation
+func TestExtremeTokenLengths(t *testing.T) {
+	// Generate test key pair
+	privKey, pubKey := generateTestRSAKeyPair(t)
+
+	// Set global private key for decryption function
+	originalPrivateKey := privateKey
+	privateKey = privKey
+	defer func() { privateKey = originalPrivateKey }()
+
+	testCases := []struct {
+		name  string
+		token string
+		shouldFail bool
+		errorContains string
+	}{
+		{"Empty token", "", true, "too short"},
+		{"Single char", "a", false, ""},
+		{"Normal FCM token", "dGVzdF90b2tlbl9mb3JfZmNt", false, ""},
+		{"Very long token", strings.Repeat("x", 2001), true, "too long"},
+		{"Max valid length", strings.Repeat("x", 2000), false, ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.token == "" {
+				// Special case: test empty token by creating minimal invalid encrypted data
+				_, err := decryptHybridToken("")
+				if !tc.shouldFail {
+					t.Errorf("Expected success for %s, got error: %v", tc.name, err)
+				} else if err == nil || !strings.Contains(err.Error(), tc.errorContains) {
+					t.Errorf("Expected error containing %q for %s, got: %v", tc.errorContains, tc.name, err)
+				}
+				return
+			}
+
+			// Encrypt the test token
+			encrypted, err := encryptTokenHybrid(tc.token, pubKey)
+			if err != nil {
+				t.Fatalf("Failed to encrypt token for %s: %v", tc.name, err)
+			}
+
+			// Try to decrypt
+			decrypted, err := decryptHybridToken(encrypted)
+
+			if tc.shouldFail {
+				if err == nil {
+					t.Errorf("Expected failure for %s, but succeeded", tc.name)
+				} else if !strings.Contains(err.Error(), tc.errorContains) {
+					t.Errorf("Expected error containing %q for %s, got: %v", tc.errorContains, tc.name, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected success for %s, got error: %v", tc.name, err)
+				} else if decrypted != tc.token {
+					t.Errorf("Token mismatch for %s: expected %q, got %q", tc.name, tc.token, decrypted)
+				}
+			}
+		})
 	}
 }
 

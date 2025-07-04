@@ -173,6 +173,38 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate size limits for encrypted data
+	if len(reg.EncryptedData) < 100 { // Minimum: base64(IV + key_len + min_RSA + min_token + auth_tag)
+		http.Error(w, "Encrypted data too short", http.StatusBadRequest)
+		return
+	}
+	if len(reg.EncryptedData) > 10000 { // Maximum: reasonable limit for FCM tokens
+		http.Error(w, "Encrypted data too long", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that the token can be decrypted correctly before storing
+	decryptedToken, err := decryptHybridToken(reg.EncryptedData)
+	if err != nil {
+		log.Printf("Token validation failed: %v", err)
+		http.Error(w, "Invalid encrypted token", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the decrypted token looks like a valid FCM token
+	if len(decryptedToken) < 10 {
+		http.Error(w, "Decrypted token too short", http.StatusBadRequest)
+		return
+	}
+	if len(decryptedToken) > 1000 {
+		http.Error(w, "Decrypted token too long", http.StatusBadRequest)
+		return
+	}
+
+	// Securely wipe decrypted token from memory
+	secureWipeString(&decryptedToken)
+
+	// Store encrypted token only after successful validation
 	tokenStore.AddToken(reg.EncryptedData)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -265,6 +297,16 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 
 	if notif.EncryptedData == "" || notif.Title == "" || notif.Body == "" {
 		http.Error(w, "Encrypted data, title and body are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate size limits for encrypted data
+	if len(notif.EncryptedData) < 100 {
+		http.Error(w, "Encrypted data too short", http.StatusBadRequest)
+		return
+	}
+	if len(notif.EncryptedData) > 10000 {
+		http.Error(w, "Encrypted data too long", http.StatusBadRequest)
 		return
 	}
 
@@ -402,6 +444,14 @@ func decryptHybridToken(encryptedData string) (string, error) {
 		return "", fmt.Errorf("private key not loaded")
 	}
 
+	// Validate size limits for encrypted data
+	if len(encryptedData) < 100 { // Minimum: base64(IV + key_len + min_RSA + min_token + auth_tag)
+		return "", fmt.Errorf("encrypted data too short: %d bytes", len(encryptedData))
+	}
+	if len(encryptedData) > 10000 { // Maximum: reasonable limit for FCM tokens
+		return "", fmt.Errorf("encrypted data too long: %d bytes", len(encryptedData))
+	}
+
 	// Decode base64
 	combinedBytes, err := base64.StdEncoding.DecodeString(encryptedData)
 	if err != nil {
@@ -453,6 +503,14 @@ func decryptHybridToken(encryptedData string) (string, error) {
 	decryptedBytes, err := gcm.Open(nil, iv, encryptedToken, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt token: %v", err)
+	}
+
+	// Validate the decrypted token length (FCM tokens are typically 140-200 chars)
+	if len(decryptedBytes) < 1 {
+		return "", fmt.Errorf("decrypted token too short: %d bytes", len(decryptedBytes))
+	}
+	if len(decryptedBytes) > 2000 {
+		return "", fmt.Errorf("decrypted token too long: %d bytes", len(decryptedBytes))
 	}
 
 	return string(decryptedBytes), nil
