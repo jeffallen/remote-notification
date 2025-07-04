@@ -42,8 +42,7 @@ jobs:
     
     - name: Build Release APK
       run: |
-        cd android-fcm-app
-        gradle assembleRelease
+        gradle -p demo-app assembleRelease
     
     - name: Sign APK (if keystore secrets are available)
       if: ${{ env.KEYSTORE_BASE64 != '' }}
@@ -53,7 +52,7 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        cd android-fcm-app
+        cd demo-app
         # Decode keystore from base64
         echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
         
@@ -73,7 +72,7 @@ jobs:
     
     - name: Rename APK with version
       run: |
-        cd android-fcm-app/app/build/outputs/apk/release
+        cd demo-app/app/build/outputs/apk/release
         VERSION=${GITHUB_REF#refs/tags/}
         if [ -f "app-release-signed.apk" ]; then
           mv app-release-signed.apk "minnotif-android-${VERSION}-signed.apk"
@@ -86,7 +85,7 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: android-fcm-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
+        files: demo-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
         name: Release ${{ github.ref_name }}
         body: |
           ## 📱 Android APK Release ${{ github.ref_name }}
@@ -98,7 +97,7 @@ jobs:
           
           **Security Notes:**
           - This APK uses hybrid encryption (AES-256-GCM + RSA-4096)
-          - FCM tokens are encrypted before transmission
+          - Cloud notification tokens are encrypted before transmission
           - App-backend cannot decrypt stored tokens
           
           **Files:**
@@ -120,7 +119,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: android-apk-${{ github.ref_name }}
-        path: android-fcm-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
+        path: demo-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
         retention-days: 90
 
   build-go-binaries:
