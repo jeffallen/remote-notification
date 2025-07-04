@@ -1,0 +1,35 @@
+[Unit]
+Description=Notification Backend Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=notification-backend
+Group=notification-backend
+WorkingDirectory=/var/lib/notification-backend
+ExecStart=/usr/bin/notification-backend
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/notification-backend
+
+# Environment
+Environment=PORT=8080
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=notification-backend
+
+# Process limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+[Install]
+WantedBy=multi-user.target
