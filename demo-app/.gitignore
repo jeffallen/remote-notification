@@ -6,3 +6,6 @@ build/
 local.properties
 gradle/
 gradlew
+gradlew.bat
+release.keystore
+keystore.properties
