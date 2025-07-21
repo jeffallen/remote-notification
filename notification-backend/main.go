@@ -59,8 +59,7 @@ type NotificationRequest struct {
 }
 
 type SingleNotificationRequest struct {
-	EncryptedData string `json:"encrypted_data,omitempty"` // For backward compatibility
-	TokenID       string `json:"token_id,omitempty"`       // New opaque ID field
+	TokenID       string `json:"token_id"`                   // Opaque ID field (required)
 	PublicKeyHash string `json:"public_key_hash,omitempty"` // Public key hash for storage key
 	Title         string `json:"title"`
 	Body          string `json:"body"`
@@ -492,33 +491,19 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Support both opaque ID (new) and encrypted data (backward compatibility)
-	var encryptedData string
-	if notif.TokenID != "" {
-		// New opaque ID approach
-		token, err := getToken(notif.TokenID)
-		if err != nil {
-			log.Printf("Token ID not found: %s", notif.TokenID)
-			http.Error(w, "Token ID not found", http.StatusBadRequest)
-			return
-		}
-		encryptedData = token.EncryptedData
-	} else if notif.EncryptedData != "" {
-		// Backward compatibility with encrypted data
-		// Validate size limits for encrypted data
-		if len(notif.EncryptedData) < 100 {
-			http.Error(w, "Encrypted data too short", http.StatusBadRequest)
-			return
-		}
-		if len(notif.EncryptedData) > 10000 {
-			http.Error(w, "Encrypted data too long", http.StatusBadRequest)
-			return
-		}
-		encryptedData = notif.EncryptedData
-	} else {
-		http.Error(w, "Either token_id or encrypted_data is required", http.StatusBadRequest)
+	// Only accept opaque ID (no backwards compatibility)
+	if notif.TokenID == "" {
+		http.Error(w, "token_id is required", http.StatusBadRequest)
 		return
 	}
+
+	token, err := getToken(notif.TokenID)
+	if err != nil {
+		log.Printf("Token ID not found: %s", notif.TokenID)
+		http.Error(w, "Token ID not found", http.StatusBadRequest)
+		return
+	}
+	encryptedData := token.EncryptedData
 
 	if err := sendFCMNotification(encryptedData, notif.Title, notif.Body); err != nil {
 		log.Printf("Failed to send notification: %v", err)
@@ -571,11 +556,7 @@ Endpoints:
     Body: {"title": "Hello", "body": "Test message"}
 
   POST /notify - Send notification to specific token
-    Body: {"encrypted_data": "base64-encrypted-token", "title": "Hello", "body": "Test message"}
-
-  POST /validate - Validate encrypted token without storing
-    Body: {"encrypted_data": "base64-encrypted-token", "platform": "android"}
-    Returns: {"valid": true/false, "message": "reason"}
+    Body: {"token_id": "opaque-token-id", "title": "Hello", "body": "Test message"}
 
   GET /status - Show server status
     Returns: {"registered_tokens": N, "firebase_initialized": true/false}
@@ -745,10 +726,11 @@ func decryptHybridToken(encryptedData string) (string, error) {
 func secureWipeString(s *string) {
 	// Overwrite the string data in memory for security
 	if s != nil && *s != "" {
-		for i := range *s {
-			// This is a best-effort approach to overwrite memory
-			// Note: Go's GC may have copies, but this reduces exposure
-			_ = i
+		// Convert string to byte slice to enable overwriting
+		// This uses unsafe to access the underlying string data
+		bytes := []byte(*s)
+		for i := range bytes {
+			bytes[i] = 0
 		}
 		*s = ""
 	}

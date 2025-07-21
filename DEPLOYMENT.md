@@ -6,7 +6,7 @@ This document describes the deployment infrastructure created for the minnotif-a
 
 The project consists of three main components:
 
-1. **Android FCM App** (`android-fcm-app/`) - Kotlin Android app that encrypts and registers FCM tokens
+1. **Demo App** (`demo-app/`) - Android FCM demo app that encrypts and registers FCM tokens
 2. **App Backend** (`app-backend/`) - Go server that acts as an intermediate layer, stores encrypted tokens
 3. **Notification Backend** (`notification-backend/`) - Go server that decrypts tokens and sends FCM notifications
 

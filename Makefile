@@ -17,11 +17,11 @@ test:
 	cd notification-backend && go test -v ./...
 	@echo "All tests passed"
 
-# Build Android app
+# Build Android demo app
 android:
-	@echo "Building Android app..."
-	cd android-fcm-app && ./gradlew build
-	@echo "Android build complete"
+	@echo "Building Android demo app..."
+	cd demo-app && ./gradlew build
+	@echo "Android demo app build complete"
 
 # Install Go servers to /usr/bin (requires sudo)
 install: build
@@ -74,7 +74,7 @@ clean:
 	rm -rf bin/
 	cd app-backend && go clean
 	cd notification-backend && go clean
-	cd android-fcm-app && ./gradlew clean
+	cd demo-app && ./gradlew clean
 	@echo "Clean complete"
 
 # Create bin directory
@@ -89,7 +89,7 @@ help:
 	@echo "  all        - Build and test Go servers (default)"
 	@echo "  build      - Build Go servers"
 	@echo "  test       - Run Go tests"
-	@echo "  android    - Build Android app"
+	@echo "  android    - Build Android demo app"
 	@echo "  install    - Install Go servers to /usr/bin (requires sudo)"
 	@echo "  uninstall  - Uninstall Go servers (requires sudo)"
 	@echo "  clean      - Clean build artifacts"
