@@ -12,7 +12,8 @@ Mobile App → App Backend (Port 8081) → Notification Backend (Port 8080) → 
 
 - **Encrypted Token Storage**: Only encrypted device tokens stored, no plaintext access
 - **Zero-Knowledge**: Cannot decrypt tokens - true privacy separation from user data
-- **RAM-Only**: All data lost on restart (no persistent storage)
+- **RAM-Only**: All data lost on restart (no persistent storage of actual tokens)
+- **Public Key Hash Identification**: Sends key hash with notifications for proper routing
 - **Separate Service**: Runs independently from user data systems
 - **Individual Notifications**: Each token sent separately to maintain isolation
 - **No User Association**: Tokens never linked to accounts or profiles
@@ -107,13 +108,18 @@ curl -X POST http://localhost:8081/send-all \
 
 ## Configuration
 
-By default, app-backend forwards to `http://localhost:8080`. To change:
+Configure with command line flags:
 
-```go
-const (
-    notificationBackendURL = "http://your-notification-backend:8080"
-)
+```bash
+go run main.go \
+  --port=8443 \
+  --public-key=public_key.pem \
+  --backend-url=http://localhost:8080 \
+  --cert=cert.pem \
+  --key=key.pem
 ```
+
+The public key must match the notification backend's public key for proper token routing.
 
 ## Privacy Benefits
 

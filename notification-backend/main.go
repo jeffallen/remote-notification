@@ -30,8 +30,16 @@ var (
 	port                  = flag.String("port", "8080", "Port to listen on")
 	serviceAccountKeyPath = flag.String("firebase-key", "key.json", "Path to Firebase service account key file")
 	privateKeyPath        = flag.String("private-key", "private_key.pem", "Path to RSA private key file")
-	storageFile           = flag.String("storage-file", "tokens.json", "Path to token storage file")
-	version               = "dev" // Set by build flags
+	publicKeyPath         = flag.String("public-key", "public_key.pem", "Path to RSA public key file")
+	storageFile           = flag.String("storage-file", "tokens.json", "Path to token storage file (fallback only)")
+	
+	// Exoscale SOS configuration
+	sosAccessKey = flag.String("sos-access-key", "", "Exoscale SOS access key")
+	sosSecretKey = flag.String("sos-secret-key", "", "Exoscale SOS secret key")
+	sosBucket    = flag.String("sos-bucket", "notification-tokens", "Exoscale SOS bucket name")
+	sosZone      = flag.String("sos-zone", "ch-gva-2", "Exoscale SOS zone")
+	
+	version = "dev" // Set by build flags
 )
 
 type ServiceAccountKey struct {
@@ -53,6 +61,7 @@ type NotificationRequest struct {
 type SingleNotificationRequest struct {
 	EncryptedData string `json:"encrypted_data,omitempty"` // For backward compatibility
 	TokenID       string `json:"token_id,omitempty"`       // New opaque ID field
+	PublicKeyHash string `json:"public_key_hash,omitempty"` // Public key hash for storage key
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 }
@@ -203,8 +212,11 @@ func (ts *DurableTokenStore) saveToFile() error {
 
 var (
 	tokenStore      *DurableTokenStore
+	exoscaleStorage *ExoscaleStorage
 	messagingClient *messaging.Client
 	privateKey      *rsa.PrivateKey
+	publicKeyHash   string
+	useExoscale     bool
 )
 
 func main() {
@@ -215,7 +227,14 @@ func main() {
 	log.Printf("  Port: %s", *port)
 	log.Printf("  Firebase Key: %s", *serviceAccountKeyPath)
 	log.Printf("  Private Key: %s", *privateKeyPath)
-	log.Printf("  Storage File: %s", *storageFile)
+	log.Printf("  Public Key: %s", *publicKeyPath)
+	log.Printf("  Storage File: %s (fallback)", *storageFile)
+	log.Printf("  SOS Bucket: %s", *sosBucket)
+	log.Printf("  SOS Zone: %s", *sosZone)
+	log.Printf("  SOS Access Key: %s", maskString(*sosAccessKey))
+	
+	// Determine if we should use Exoscale SOS
+	useExoscale = *sosAccessKey != "" && *sosSecretKey != ""
 
 	// Read project ID from service account key
 	projectID, err := readProjectIDFromKey(*serviceAccountKeyPath)
@@ -246,9 +265,35 @@ func main() {
 		log.Fatalf("Error loading private key: %v", err)
 	}
 	log.Printf("RSA private key loaded successfully")
+	
+	// Load public key and compute hash
+	publicKeyPEM, err := readPublicKeyPEM(*publicKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading public key: %v", err)
+	}
+	publicKeyHash = ComputePublicKeyHash(publicKeyPEM)
+	log.Printf("Public key hash computed: %s", publicKeyHash[:16]+"...")
 
-	// Initialize durable token store
+	// Initialize storage layer
+	if useExoscale {
+		// Initialize Exoscale SOS storage
+		exoscaleStorage, err = NewExoscaleStorage(*sosAccessKey, *sosSecretKey, *sosBucket, *sosZone, publicKeyHash)
+		if err != nil {
+			log.Fatalf("Error initializing Exoscale SOS storage: %v", err)
+		}
+		log.Printf("Using Exoscale SOS for durable storage")
+	} else {
+		log.Printf("Warning: No SOS credentials provided, falling back to local file storage")
+		log.Printf("         This is not recommended for production use")
+	}
+	
+	// Initialize fallback file-based token store (always available)
 	tokenStore = NewDurableTokenStore(*storageFile)
+	
+	// Start cleanup goroutine if using Exoscale
+	if useExoscale {
+		go startCleanupRoutine()
+	}
 
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send", handleSend)
@@ -257,6 +302,7 @@ func main() {
 	http.HandleFunc("/", handleRoot)
 
 	log.Printf("FCM Notification Server starting on port %s", *port)
+	log.Printf("Storage: %s", getStorageType())
 	log.Printf("Endpoints:")
 	log.Printf("  POST /register - Register FCM token")
 	log.Printf("  POST /send     - Send notification to all registered tokens")
@@ -325,12 +371,24 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Securely wipe decrypted token from memory
 	secureWipeString(&decryptedToken)
 
-	// Store encrypted token and get opaque ID
-	opaqueID, err := tokenStore.AddToken(reg.EncryptedData, reg.Platform)
-	if err != nil {
-		log.Printf("Failed to store token: %v", err)
-		http.Error(w, "Failed to store token", http.StatusInternalServerError)
-		return
+	// Generate opaque ID
+	opaqueID := generateOpaqueID()
+	
+	// Store token using primary storage (Exoscale SOS if available, fallback to file)
+	if useExoscale {
+		ctx := context.Background()
+		if err := exoscaleStorage.StoreToken(ctx, opaqueID, reg.EncryptedData, reg.Platform); err != nil {
+			log.Printf("Failed to store token in Exoscale SOS: %v", err)
+			http.Error(w, "Failed to store token", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Fallback to file-based storage
+		if _, err := tokenStore.AddToken(reg.EncryptedData, reg.Platform); err != nil {
+			log.Printf("Failed to store token in file storage: %v", err)
+			http.Error(w, "Failed to store token", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -339,7 +397,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		"message":      "Token registered successfully",
 		"token_id":     opaqueID,
 		"platform":     reg.Platform,
-		"total_tokens": tokenStore.Count(),
+		"total_tokens": getTotalTokenCount(),
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding response: %v", err)
@@ -371,8 +429,14 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opaqueIDs := tokenStore.GetAllOpaqueIDs()
-	if len(opaqueIDs) == 0 {
+	tokens, err := getAllTokens()
+	if err != nil {
+		log.Printf("Failed to get tokens: %v", err)
+		http.Error(w, "Failed to retrieve tokens", http.StatusInternalServerError)
+		return
+	}
+	
+	if len(tokens) == 0 {
 		http.Error(w, "No tokens registered", http.StatusBadRequest)
 		return
 	}
@@ -380,18 +444,10 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	successCount := 0
 	errorCount := 0
 
-	for _, opaqueID := range opaqueIDs {
-		encryptedToken, err := tokenStore.GetEncryptedToken(opaqueID)
-		if err != nil {
-			log.Printf("Failed to get token for opaque ID %s...%s: %v",
-				opaqueID[:8], opaqueID[len(opaqueID)-8:], err)
-			errorCount++
-			continue
-		}
-
-		if err := sendFCMNotification(encryptedToken, notif.Title, notif.Body); err != nil {
+	for _, token := range tokens {
+		if err := sendFCMNotification(token.EncryptedData, notif.Title, notif.Body); err != nil {
 			log.Printf("Failed to send to opaque ID %s...%s: %v",
-				opaqueID[:8], opaqueID[len(opaqueID)-8:], err)
+				token.OpaqueID[:8], token.OpaqueID[len(token.OpaqueID)-8:], err)
 			errorCount++
 		} else {
 			successCount++
@@ -404,7 +460,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		"message":      fmt.Sprintf("Sent to %d devices, %d failures", successCount, errorCount),
 		"sent_count":   successCount,
 		"error_count":  errorCount,
-		"total_tokens": len(opaqueIDs),
+		"total_tokens": len(tokens),
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding response: %v", err)
@@ -440,13 +496,13 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 	var encryptedData string
 	if notif.TokenID != "" {
 		// New opaque ID approach
-		var err error
-		encryptedData, err = tokenStore.GetEncryptedToken(notif.TokenID)
+		token, err := getToken(notif.TokenID)
 		if err != nil {
 			log.Printf("Token ID not found: %s", notif.TokenID)
 			http.Error(w, "Token ID not found", http.StatusBadRequest)
 			return
 		}
+		encryptedData = token.EncryptedData
 	} else if notif.EncryptedData != "" {
 		// Backward compatibility with encrypted data
 		// Validate size limits for encrypted data
@@ -492,9 +548,11 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
-		"registered_tokens":    tokenStore.Count(),
+		"registered_tokens":    getTotalTokenCount(),
 		"firebase_initialized": messagingClient != nil,
 		"api_version":          "FCM v1 (Firebase Admin SDK)",
+		"storage_type":         getStorageType(),
+		"public_key_hash":      publicKeyHash[:16] + "...",
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding response: %v", err)
@@ -525,7 +583,9 @@ Endpoints:
 Registered tokens: %d
 Firebase initialized: %v
 API Version: FCM v1 (Firebase Admin SDK)
-`, tokenStore.Count(), messagingClient != nil); err != nil {
+Storage Type: %s
+Public Key Hash: %s
+`, getTotalTokenCount(), messagingClient != nil, getStorageType(), publicKeyHash[:16]+"..."); err != nil {
 		log.Printf("Error writing response: %v", err)
 	}
 }
@@ -699,4 +759,135 @@ func secureWipeBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
+}
+
+// maskString masks a string for logging, showing only first and last 4 chars
+func maskString(s string) string {
+	if len(s) <= 8 {
+		return "[REDACTED]"
+	}
+	return s[:4] + "..." + s[len(s)-4:]
+}
+
+// getStorageType returns a human-readable description of the storage type in use
+func getStorageType() string {
+	if useExoscale {
+		return fmt.Sprintf("Exoscale SOS (bucket: %s, zone: %s)", *sosBucket, *sosZone)
+	}
+	return "Local file (fallback mode)"
+}
+
+// readPublicKeyPEM reads a public key PEM file and returns its content
+func readPublicKeyPEM(keyPath string) (string, error) {
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read public key file: %v", err)
+	}
+	return string(data), nil
+}
+
+// startCleanupRoutine runs a goroutine that periodically cleans up old tokens
+func startCleanupRoutine() {
+	ticker := time.NewTicker(24 * time.Hour) // Run cleanup once per day
+	defer ticker.Stop()
+	
+	log.Printf("Starting token cleanup routine (runs every 24 hours)")
+	
+	// Run initial cleanup after 5 minutes to allow for startup
+	time.AfterFunc(5*time.Minute, func() {
+		ctx := context.Background()
+		deleted, err := exoscaleStorage.CleanupOldTokens(ctx, 30*24*time.Hour) // 30 days
+		if err != nil {
+			log.Printf("Error during initial token cleanup: %v", err)
+		} else {
+			log.Printf("Initial cleanup completed: removed %d old tokens", deleted)
+		}
+	})
+	
+	for range ticker.C {
+		ctx := context.Background()
+		deleted, err := exoscaleStorage.CleanupOldTokens(ctx, 30*24*time.Hour) // 30 days
+		if err != nil {
+			log.Printf("Error during scheduled token cleanup: %v", err)
+		} else if deleted > 0 {
+			log.Printf("Scheduled cleanup completed: removed %d old tokens", deleted)
+		}
+	}
+}
+
+// Helper functions for unified storage access
+
+// generateOpaqueID creates a new opaque identifier
+func generateOpaqueID() string {
+	// Generate 32 random bytes (256 bits)
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		log.Printf("Error generating random bytes: %v", err)
+		// Fallback to timestamp + random for uniqueness
+		return fmt.Sprintf("%d_%x", time.Now().UnixNano(), bytes[:16])
+	}
+	return hex.EncodeToString(bytes)
+}
+
+// getToken retrieves a token by opaque ID from the appropriate storage
+func getToken(opaqueID string) (*TokenStorageInfo, error) {
+	if useExoscale {
+		ctx := context.Background()
+		return exoscaleStorage.GetToken(ctx, opaqueID)
+	}
+	
+	// Fallback to file storage - need to convert format
+	encryptedData, err := tokenStore.GetEncryptedToken(opaqueID)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &TokenStorageInfo{
+		OpaqueID:      opaqueID,
+		EncryptedData: encryptedData,
+		Platform:      "unknown", // File storage doesn't track platform separately
+		LastUsedAt:    time.Now(),
+	}, nil
+}
+
+// getAllTokens retrieves all tokens from the appropriate storage
+func getAllTokens() ([]*TokenStorageInfo, error) {
+	if useExoscale {
+		ctx := context.Background()
+		return exoscaleStorage.ListAllTokens(ctx)
+	}
+	
+	// Fallback to file storage - need to convert format
+	opaqueIDs := tokenStore.GetAllOpaqueIDs()
+	tokens := make([]*TokenStorageInfo, 0, len(opaqueIDs))
+	
+	for _, opaqueID := range opaqueIDs {
+		encryptedData, err := tokenStore.GetEncryptedToken(opaqueID)
+		if err != nil {
+			log.Printf("Warning: failed to get token for ID %s: %v", opaqueID[:16]+"...", err)
+			continue
+		}
+		
+		tokens = append(tokens, &TokenStorageInfo{
+			OpaqueID:      opaqueID,
+			EncryptedData: encryptedData,
+			Platform:      "unknown",
+			LastUsedAt:    time.Now(),
+		})
+	}
+	
+	return tokens, nil
+}
+
+// getTotalTokenCount returns the total number of tokens in storage
+func getTotalTokenCount() int {
+	if useExoscale {
+		tokens, err := getAllTokens()
+		if err != nil {
+			log.Printf("Warning: failed to count tokens: %v", err)
+			return 0
+		}
+		return len(tokens)
+	}
+	return tokenStore.Count()
 }

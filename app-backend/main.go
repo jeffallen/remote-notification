@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -18,6 +21,7 @@ var (
 	port                   = flag.String("port", "8443", "Port to listen on")
 	certFile               = flag.String("cert", "cert.pem", "Path to TLS certificate file")
 	keyFile                = flag.String("key", "key.pem", "Path to TLS private key file")
+	publicKeyPath          = flag.String("public-key", "public_key.pem", "Path to RSA public key file")
 	notificationBackendURL = flag.String("backend-url", "http://localhost:8080", "URL of the notification backend service")
 	version                = "dev" // Set by build flags
 )
@@ -28,9 +32,10 @@ type TokenRegistration struct {
 }
 
 type NotificationRequest struct {
-	TokenID string `json:"token_id"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
+	TokenID       string `json:"token_id"`
+	PublicKeyHash string `json:"public_key_hash,omitempty"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // TokenStore holds opaque token identifiers in memory only
@@ -72,7 +77,10 @@ func (ts *TokenStore) Count() int {
 	return len(ts.tokenIDs)
 }
 
-var tokenStore = NewTokenStore()
+var (
+	tokenStore    = NewTokenStore()
+	publicKeyHash string
+)
 
 func main() {
 	flag.Parse()
@@ -82,7 +90,16 @@ func main() {
 	log.Printf("  Port: %s", *port)
 	log.Printf("  TLS Cert: %s", *certFile)
 	log.Printf("  TLS Key: %s", *keyFile)
+	log.Printf("  Public Key: %s", *publicKeyPath)
 	log.Printf("  Backend URL: %s", *notificationBackendURL)
+	
+	// Load public key and compute hash
+	publicKeyPEM, err := readPublicKeyPEM(*publicKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading public key: %v", err)
+	}
+	publicKeyHash = computePublicKeyHash(publicKeyPEM)
+	log.Printf("Public key hash computed: %s", publicKeyHash[:16]+"...")
 
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send-all", handleSendAll)
@@ -169,9 +186,10 @@ func handleSendAll(w http.ResponseWriter, r *http.Request) {
 	// Send individual notification for each token ID
 	for _, tokenID := range tokenIDs {
 		notifReq := NotificationRequest{
-			TokenID: tokenID,
-			Title:   "App Notification",
-			Body:    message,
+			TokenID:       tokenID,
+			PublicKeyHash: publicKeyHash,
+			Title:         "App Notification",
+			Body:          message,
 		}
 
 		if err := sendNotificationToBackend(notifReq); err != nil {
@@ -360,3 +378,18 @@ const homeTemplate = `
 </body>
 </html>
 `
+
+// readPublicKeyPEM reads a public key PEM file and returns its content
+func readPublicKeyPEM(keyPath string) (string, error) {
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read public key file: %v", err)
+	}
+	return string(data), nil
+}
+
+// computePublicKeyHash computes a SHA256 hash of the public key for use in storage keys
+func computePublicKeyHash(publicKeyPEM string) string {
+	hash := sha256.Sum256([]byte(publicKeyPEM))
+	return hex.EncodeToString(hash[:])
+}

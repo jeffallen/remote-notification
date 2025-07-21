@@ -7,7 +7,8 @@ A minimal Go server for receiving FCM token registrations and sending push notif
 - **Hybrid Encrypted Tokens**: Accept AES-GCM + RSA encrypted FCM tokens from app-backend
 - **Push Notifications**: Send notifications using Firebase Admin SDK v1 API
 - **Hybrid Decryption**: Decrypt AES keys with RSA, then tokens with AES-GCM
-- **Simple Storage**: In-memory encrypted token storage (tokens lost on restart)
+- **Durable Storage**: Exoscale SOS cloud storage with automatic cleanup (file fallback available)
+- **Opaque Token System**: Privacy-preserving token management with public key hash namespacing
 - **Status Monitoring**: Check registered token count and Firebase initialization status
 - **Modern API**: Uses Firebase Cloud Messaging API v1 (not legacy API)
 - **Privacy by Design**: Private key isolation and secure memory handling
@@ -45,7 +46,22 @@ The server will automatically load both on startup and extract the project ID fr
 
 **Important**: Both files are gitignored and should never be committed to version control.
 
-### 3. Run Server
+### 3. Configure Storage (Optional)
+
+For production deployments, configure Exoscale SOS for durable token storage:
+
+```bash
+# Start with Exoscale SOS storage
+go run main.go \
+  --sos-access-key=YOUR_ACCESS_KEY \
+  --sos-secret-key=YOUR_SECRET_KEY \
+  --sos-bucket=notification-tokens \
+  --sos-zone=ch-gva-2
+```
+
+Without SOS credentials, the server falls back to local file storage.
+
+### 4. Run Server
 
 ```bash
 go run main.go
@@ -127,7 +143,8 @@ Shows available endpoints and current status.
 
 ## Notes
 
-- **Encrypted Storage**: Encrypted tokens stored in memory, lost when server restarts
+- **Durable Storage**: Tokens stored in Exoscale SOS with automatic 30-day cleanup
+- **Fallback Mode**: File-based storage available when SOS credentials not provided
 - **No Authentication**: This is a minimal demo server
 - **Firebase Admin SDK**: Uses official Firebase Admin SDK for Go
 - **FCM v1 API**: Uses the modern Firebase Cloud Messaging API v1
@@ -161,3 +178,20 @@ Android App ──[Hybrid Encrypt]──> App Backend ──[Pass Through]──
 ## Privacy Considerations
 
 This server stores FCM tokens in memory without linking them to user identities, which aligns with privacy-sensitive design discussed in the chat transcript.
+
+## Storage Options
+
+### Exoscale SOS (Recommended)
+
+- **Persistent**: Tokens survive server restarts
+- **Scalable**: Handles large numbers of devices
+- **Auto-cleanup**: Removes unused tokens after 30 days
+- **Secure**: Public key hash namespacing prevents collisions
+
+### File Storage (Fallback)
+
+- **Simple**: No external dependencies
+- **Limited**: Not suitable for production scale
+- **Temporary**: Tokens persist across restarts but not recommended for production
+
+See `EXOSCALE_SOS_SETUP.md` for detailed configuration instructions.

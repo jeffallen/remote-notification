@@ -1,4 +1,13 @@
 # minnotif-android
+
+## Features
+
+- **End-to-End Encrypted Notifications**: RSA + AES hybrid encryption
+- **Opaque Token System**: Privacy-preserving token management
+- **Durable Storage**: Exoscale SOS integration for persistent token storage
+- **Automatic Cleanup**: Removes unused tokens after 30 days
+- **Multiple Storage Backends**: SOS primary, file-based fallback
+- **Public Key Hash Namespacing**: Prevents key collision in multi-tenant scenarios
 ## Security Setup
 
 ### Generating New RSA Keypairs for Deployment
