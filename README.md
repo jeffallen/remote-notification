@@ -1,18 +1,26 @@
-# minnotif-android
+# Bold
+
+Privacy-focused notification system with end-to-end encrypted FCM token management.
+
+## Architecture
+
+```
+Android App → App Backend (8081) → Notification Backend (8080) → Firebase FCM
+```
+
+**Privacy by Design**: The app-backend acts as a zero-knowledge intermediary that cannot decrypt device tokens, ensuring organizational separation between user data and notification infrastructure.
 
 ## Features
 
 - **End-to-End Encrypted Notifications**: RSA + AES hybrid encryption
-- **Opaque Token System**: Privacy-preserving token management
-- **Durable Storage**: Exoscale SOS integration for persistent token storage
-- **Automatic Cleanup**: Removes unused tokens after 30 days
-- **Multiple Storage Backends**: SOS primary, file-based fallback
+- **Zero-Knowledge Intermediary**: App-backend cannot decrypt tokens
+- **Durable Storage**: Exoscale SOS integration with automatic cleanup
 - **Public Key Hash Namespacing**: Prevents key collision in multi-tenant scenarios
-## Security Setup
+- **Modern FCM API**: Uses Firebase Cloud Messaging API v1
 
-### Generating New RSA Keypairs for Deployment
+## Quick Start
 
-For production deployment, generate a new RSA-4096 keypair:
+### 1. Generate RSA Keypair
 
 ```bash
 # Generate private key
@@ -22,35 +30,48 @@ openssl genrsa -out private_key.pem 4096
 openssl rsa -in private_key.pem -pubout -out public_key.pem
 ```
 
-### Files to Update with New Public Key
+### 2. Deploy Keys
 
-After generating a new keypair:
-
-1. **Android App**: Replace `demo-app/app/src/main/assets/public_key.pem` with your new public key
-2. **Notification Backend**: Place `private_key.pem` in `notification-backend/` directory
-3. **Rebuild and Deploy**: The Android app must be rebuilt with the new public key
-
-### Security Notes
-
+- **Android App**: Replace `demo-app/app/src/main/assets/public_key.pem`
+- **Notification Backend**: Place `private_key.pem` in `notification-backend/`
 - **Never commit** `private_key.pem` to version control
-- Keep the private key secure on the notification-backend server only
-- Each deployment should use a unique keypair
-- Rotate keys periodically for enhanced security
 
-### Hybrid Encryption Architecture
+### 3. Start Services
 
-The system uses hybrid encryption for optimal security and performance:
+```bash
+# Terminal 1: Start notification backend
+cd notification-backend
+go run main.go  # Runs on :8080
 
-1. **Per-Token AES Key**: Each token gets a unique AES-256 key
-2. **RSA Protection**: AES key encrypted with RSA-4096 public key
-3. **AEAD Encryption**: Token encrypted with AES-GCM for authenticity
-4. **Zero-Knowledge Relay**: App-backend cannot decrypt any data
-5. **Memory Security**: Keys wiped immediately after use
-
+# Terminal 2: Start app backend  
+cd app-backend
+go run main.go  # Runs on :8081
 ```
-Android App:
-  Token → AES-256-GCM → RSA-4096(AES-key) → Base64 → Network
 
-Notification Backend:
-  Base64 → RSA-decrypt(AES-key) → AES-256-GCM-decrypt → Token → FCM
-```
+### 4. Configure Firebase
+
+See `notification-backend/README.md` for Firebase setup instructions.
+
+## Security Architecture
+
+### Hybrid Encryption Flow
+
+1. **Android App**: Token → AES-256-GCM → RSA-4096(AES-key) → Base64 → Network
+2. **App Backend**: Pass-through (zero-knowledge)
+3. **Notification Backend**: Base64 → RSA-decrypt(AES-key) → AES-GCM-decrypt → Token → FCM
+
+### Privacy Guarantees
+
+- **Zero-Knowledge Relay**: App-backend cryptographically cannot access tokens
+- **Just-in-Time Decryption**: Tokens decrypted only when sending notifications
+- **Memory Security**: Keys wiped immediately after use
+- **Private Key Isolation**: Private key never leaves notification-backend
+- **Per-Token Keys**: Each token encrypted with unique AES key
+
+## Components
+
+- **[demo-app](demo-app/)**: Android FCM client with hybrid encryption
+- **[app-backend](app-backend/)**: Zero-knowledge intermediary service
+- **[notification-backend](notification-backend/)**: FCM notification service with token decryption
+
+See individual component READMEs for detailed setup and API documentation.
