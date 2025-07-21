@@ -17,7 +17,7 @@ openssl rsa -in private_key.pem -pubout -out public_key.pem
 
 After generating a new keypair:
 
-1. **Android App**: Replace `android-fcm-app/app/src/main/assets/public_key.pem` with your new public key
+1. **Android App**: Replace `demo-app/app/src/main/assets/public_key.pem` with your new public key
 2. **Notification Backend**: Place `private_key.pem` in `notification-backend/` directory
 3. **Rebuild and Deploy**: The Android app must be rebuilt with the new public key
 

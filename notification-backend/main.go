@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -23,9 +24,12 @@ import (
 	"google.golang.org/api/option"
 )
 
-const (
-	serviceAccountKeyPath = "key.json"
-	privateKeyPath        = "private_key.pem"
+var (
+	// Command-line configuration
+	port                  = flag.String("port", "8080", "Port to listen on")
+	serviceAccountKeyPath = flag.String("firebase-key", "key.json", "Path to Firebase service account key file")
+	privateKeyPath        = flag.String("private-key", "private_key.pem", "Path to RSA private key file")
+	version               = "dev" // Set by build flags
 )
 
 type ServiceAccountKey struct {
@@ -98,15 +102,23 @@ var (
 )
 
 func main() {
+	flag.Parse()
+
+	log.Printf("Notification Backend Server v%s", version)
+	log.Printf("Configuration:")
+	log.Printf("  Port: %s", *port)
+	log.Printf("  Firebase Key: %s", *serviceAccountKeyPath)
+	log.Printf("  Private Key: %s", *privateKeyPath)
+
 	// Read project ID from service account key
-	projectID, err := readProjectIDFromKey(serviceAccountKeyPath)
+	projectID, err := readProjectIDFromKey(*serviceAccountKeyPath)
 	if err != nil {
 		log.Fatalf("Error reading project ID from key file: %v", err)
 	}
 
 	// Initialize Firebase Admin SDK
 	ctx := context.Background()
-	opt := option.WithCredentialsFile(serviceAccountKeyPath)
+	opt := option.WithCredentialsFile(*serviceAccountKeyPath)
 	app, err := firebase.NewApp(ctx, &firebase.Config{
 		ProjectID: projectID,
 	}, opt)
@@ -122,7 +134,7 @@ func main() {
 	log.Printf("Firebase Admin SDK initialized successfully")
 
 	// Load RSA private key for token decryption
-	privateKey, err = loadPrivateKey(privateKeyPath)
+	privateKey, err = loadPrivateKey(*privateKeyPath)
 	if err != nil {
 		log.Fatalf("Error loading private key: %v", err)
 	}
@@ -134,8 +146,7 @@ func main() {
 	http.HandleFunc("/status", handleStatus)
 	http.HandleFunc("/", handleRoot)
 
-	port := "8080"
-	log.Printf("FCM Notification Server starting on port %s", port)
+	log.Printf("FCM Notification Server starting on port %s", *port)
 	log.Printf("Endpoints:")
 	log.Printf("  POST /register - Register FCM token")
 	log.Printf("  POST /send     - Send notification to all registered tokens")
@@ -143,7 +154,7 @@ func main() {
 	log.Printf("  GET  /status   - Show registered token count")
 	log.Printf("  GET  /         - Show this help")
 
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+*port, nil); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
@@ -173,6 +184,38 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate size limits for encrypted data
+	if len(reg.EncryptedData) < 100 { // Minimum: base64(IV + key_len + min_RSA + min_token + auth_tag)
+		http.Error(w, "Encrypted data too short", http.StatusBadRequest)
+		return
+	}
+	if len(reg.EncryptedData) > 10000 { // Maximum: reasonable limit for FCM tokens
+		http.Error(w, "Encrypted data too long", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that the token can be decrypted correctly before storing
+	decryptedToken, err := decryptHybridToken(reg.EncryptedData)
+	if err != nil {
+		log.Printf("Token validation failed: %v", err)
+		http.Error(w, "Invalid encrypted token", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the decrypted token looks like a valid FCM token
+	if len(decryptedToken) < 10 {
+		http.Error(w, "Decrypted token too short", http.StatusBadRequest)
+		return
+	}
+	if len(decryptedToken) > 1000 {
+		http.Error(w, "Decrypted token too long", http.StatusBadRequest)
+		return
+	}
+
+	// Securely wipe decrypted token from memory
+	secureWipeString(&decryptedToken)
+
+	// Store encrypted token only after successful validation
 	tokenStore.AddToken(reg.EncryptedData)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -182,7 +225,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		"platform":     reg.Platform,
 		"total_tokens": tokenStore.Count(),
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleSend(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +285,9 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		"error_count":  errorCount,
 		"total_tokens": len(tokens),
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleNotify(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +315,16 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate size limits for encrypted data
+	if len(notif.EncryptedData) < 100 {
+		http.Error(w, "Encrypted data too short", http.StatusBadRequest)
+		return
+	}
+	if len(notif.EncryptedData) > 10000 {
+		http.Error(w, "Encrypted data too long", http.StatusBadRequest)
+		return
+	}
+
 	if err := sendFCMNotification(notif.EncryptedData, notif.Title, notif.Body); err != nil {
 		log.Printf("Failed to send notification: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -277,7 +334,9 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 			"message": "Failed to send notification",
 			"error":   err.Error(),
 		}
-		json.NewEncoder(w).Encode(response)
+		if encodeErr := json.NewEncoder(w).Encode(response); encodeErr != nil {
+			log.Printf("Error encoding error response: %v", encodeErr)
+		}
 		return
 	}
 
@@ -286,7 +345,9 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Notification sent successfully",
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -296,22 +357,28 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		"firebase_initialized": messagingClient != nil,
 		"api_version":          "FCM v1 (Firebase Admin SDK)",
 	}
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, `FCM Notification Server (v1 API)
+	if _, err := fmt.Fprintf(w, `FCM Notification Server (v1 API)
 
 Endpoints:
   POST /register - Register FCM token
-    Body: {"token": "fcm-token", "platform": "android"}
+    Body: {"encrypted_data": "base64-encrypted-token", "platform": "android"}
 
   POST /send - Send notification to all registered tokens
     Body: {"title": "Hello", "body": "Test message"}
 
   POST /notify - Send notification to specific token
-    Body: {"token": "fcm-token", "title": "Hello", "body": "Test message"}
+    Body: {"encrypted_data": "base64-encrypted-token", "title": "Hello", "body": "Test message"}
+
+  POST /validate - Validate encrypted token without storing
+    Body: {"encrypted_data": "base64-encrypted-token", "platform": "android"}
+    Returns: {"valid": true/false, "message": "reason"}
 
   GET /status - Show server status
     Returns: {"registered_tokens": N, "firebase_initialized": true/false}
@@ -319,12 +386,14 @@ Endpoints:
 Registered tokens: %d
 Firebase initialized: %v
 API Version: FCM v1 (Firebase Admin SDK)
-`, tokenStore.Count(), messagingClient != nil)
+`, tokenStore.Count(), messagingClient != nil); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
 }
 
 func sendFCMNotification(encryptedData, title, body string) error {
 	if messagingClient == nil {
-		return fmt.Errorf("Firebase messaging client not initialized")
+		return fmt.Errorf("firebase messaging client not initialized")
 	}
 
 	// Decrypt the token using hybrid decryption
@@ -402,6 +471,14 @@ func decryptHybridToken(encryptedData string) (string, error) {
 		return "", fmt.Errorf("private key not loaded")
 	}
 
+	// Validate size limits for encrypted data
+	if len(encryptedData) < 100 { // Minimum: base64(IV + key_len + min_RSA + min_token + auth_tag)
+		return "", fmt.Errorf("encrypted data too short: %d bytes", len(encryptedData))
+	}
+	if len(encryptedData) > 10000 { // Maximum: reasonable limit for FCM tokens
+		return "", fmt.Errorf("encrypted data too long: %d bytes", len(encryptedData))
+	}
+
 	// Decode base64
 	combinedBytes, err := base64.StdEncoding.DecodeString(encryptedData)
 	if err != nil {
@@ -416,6 +493,12 @@ func decryptHybridToken(encryptedData string) (string, error) {
 	iv := combinedBytes[:12]
 	keyLengthBytes := combinedBytes[12:16]
 	keyLength := int(keyLengthBytes[0])<<24 | int(keyLengthBytes[1])<<16 | int(keyLengthBytes[2])<<8 | int(keyLengthBytes[3])
+
+	// Validate RSA key size - encrypted AES key must match RSA key size
+	expectedKeySize := privateKey.Size() // RSA key size in bytes
+	if keyLength != expectedKeySize {
+		return "", fmt.Errorf("invalid encrypted AES key size: expected %d bytes (RSA-%d), got %d bytes", expectedKeySize, privateKey.Size()*8, keyLength)
+	}
 
 	if len(combinedBytes) < 16+keyLength {
 		return "", fmt.Errorf("encrypted data malformed")
@@ -447,6 +530,14 @@ func decryptHybridToken(encryptedData string) (string, error) {
 	decryptedBytes, err := gcm.Open(nil, iv, encryptedToken, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt token: %v", err)
+	}
+
+	// Validate the decrypted token length (FCM tokens are typically 140-200 chars)
+	if len(decryptedBytes) < 1 {
+		return "", fmt.Errorf("decrypted token too short: %d bytes", len(decryptedBytes))
+	}
+	if len(decryptedBytes) > 2000 {
+		return "", fmt.Errorf("decrypted token too long: %d bytes", len(decryptedBytes))
 	}
 
 	return string(decryptedBytes), nil

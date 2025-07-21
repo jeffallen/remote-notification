@@ -5,12 +5,12 @@ A privacy-focused intermediate server that sits between mobile apps and the noti
 ## Architecture
 
 ```
-Mobile App → App Backend (Port 8081) → Notification Backend (Port 8080) → FCM
+Mobile App → App Backend (Port 8081) → Notification Backend (Port 8080) → Firebase Cloud Messaging
 ```
 
 ## Privacy Design
 
-- **Encrypted Token Storage**: Only encrypted FCM device tokens stored, no plaintext access
+- **Encrypted Token Storage**: Only encrypted device tokens stored, no plaintext access
 - **Zero-Knowledge**: Cannot decrypt tokens - true privacy separation from user data
 - **RAM-Only**: All data lost on restart (no persistent storage)
 - **Separate Service**: Runs independently from user data systems
