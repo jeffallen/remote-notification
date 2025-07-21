@@ -1,4 +1,4 @@
-# Bold
+# A system to segregate notification tokens for privacy protection
 
 Privacy-focused notification system with end-to-end encrypted FCM token management.
 

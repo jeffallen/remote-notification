@@ -8,7 +8,7 @@ Android client that registers FCM tokens using hybrid encryption and receives pu
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Create or select a project
-3. Add Android app with package name: `org.nella.fcmapp`
+3. Add Android app with package name: `org.nella.fcmapp` (demo app)
 4. Download `google-services.json` and replace the placeholder in `app/` directory
 
 ### 2. Public Key
