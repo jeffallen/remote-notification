@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -29,6 +30,7 @@ var (
 	port                  = flag.String("port", "8080", "Port to listen on")
 	serviceAccountKeyPath = flag.String("firebase-key", "key.json", "Path to Firebase service account key file")
 	privateKeyPath        = flag.String("private-key", "private_key.pem", "Path to RSA private key file")
+	storageFile           = flag.String("storage-file", "tokens.json", "Path to token storage file")
 	version               = "dev" // Set by build flags
 )
 
@@ -49,54 +51,158 @@ type NotificationRequest struct {
 }
 
 type SingleNotificationRequest struct {
-	EncryptedData string `json:"encrypted_data"`
+	EncryptedData string `json:"encrypted_data,omitempty"` // For backward compatibility
+	TokenID       string `json:"token_id,omitempty"`       // New opaque ID field
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 }
 
-// Simple in-memory token storage
-type TokenStore struct {
-	mu     sync.RWMutex
-	tokens map[string]time.Time // token -> registration time
+// TokenMapping represents a stored token mapping
+type TokenMapping struct {
+	OpaqueID      string    `json:"opaque_id"`
+	EncryptedData string    `json:"encrypted_data"`
+	Platform      string    `json:"platform"`
+	RegisteredAt  time.Time `json:"registered_at"`
 }
 
-func NewTokenStore() *TokenStore {
-	return &TokenStore{
-		tokens: make(map[string]time.Time),
+// DurableTokenStore provides persistent token storage
+type DurableTokenStore struct {
+	mu          sync.RWMutex
+	mappings    map[string]*TokenMapping // opaque_id -> TokenMapping
+	storageFile string
+}
+
+func NewDurableTokenStore(storageFile string) *DurableTokenStore {
+	store := &DurableTokenStore{
+		mappings:    make(map[string]*TokenMapping),
+		storageFile: storageFile,
 	}
+
+	// Load existing tokens from file
+	if err := store.loadFromFile(); err != nil {
+		log.Printf("Warning: Could not load existing tokens: %v", err)
+	}
+
+	return store
 }
 
-func (ts *TokenStore) AddToken(token string) {
+func (ts *DurableTokenStore) generateOpaqueID() string {
+	// Generate 32 random bytes (256 bits)
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		log.Printf("Error generating random bytes: %v", err)
+		// Fallback to timestamp + random for uniqueness
+		return fmt.Sprintf("%d_%x", time.Now().UnixNano(), bytes[:16])
+	}
+	return hex.EncodeToString(bytes)
+}
+
+func (ts *DurableTokenStore) AddToken(encryptedData, platform string) (string, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	ts.tokens[token] = time.Now()
 
-	// Safe token truncation for logging
-	tokenPreview := token
-	if len(token) > 20 {
-		tokenPreview = token[:20] + "..."
+	opaqueID := ts.generateOpaqueID()
+
+	// Ensure uniqueness (extremely unlikely collision, but handle it)
+	for _, exists := ts.mappings[opaqueID]; exists; {
+		opaqueID = ts.generateOpaqueID()
+		_, exists = ts.mappings[opaqueID]
 	}
-	log.Printf("Token registered: %s (total: %d)", tokenPreview, len(ts.tokens))
+
+	mapping := &TokenMapping{
+		OpaqueID:      opaqueID,
+		EncryptedData: encryptedData,
+		Platform:      platform,
+		RegisteredAt:  time.Now(),
+	}
+
+	ts.mappings[opaqueID] = mapping
+
+	// Persist to file
+	if err := ts.saveToFile(); err != nil {
+		log.Printf("Warning: Failed to persist token to file: %v", err)
+	}
+
+	log.Printf("Token registered with opaque ID: %s...%s (platform: %s, total: %d)",
+		opaqueID[:8], opaqueID[len(opaqueID)-8:], platform, len(ts.mappings))
+
+	return opaqueID, nil
 }
 
-func (ts *TokenStore) GetTokens() []string {
+func (ts *DurableTokenStore) GetEncryptedToken(opaqueID string) (string, error) {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
-	tokens := make([]string, 0, len(ts.tokens))
-	for token := range ts.tokens {
-		tokens = append(tokens, token)
+
+	mapping, exists := ts.mappings[opaqueID]
+	if !exists {
+		return "", fmt.Errorf("opaque ID not found")
 	}
-	return tokens
+
+	return mapping.EncryptedData, nil
 }
 
-func (ts *TokenStore) Count() int {
+func (ts *DurableTokenStore) GetAllOpaqueIDs() []string {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
-	return len(ts.tokens)
+
+	ids := make([]string, 0, len(ts.mappings))
+	for id := range ts.mappings {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (ts *DurableTokenStore) Count() int {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return len(ts.mappings)
+}
+
+func (ts *DurableTokenStore) loadFromFile() error {
+	data, err := os.ReadFile(ts.storageFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist yet, that's fine
+		}
+		return err
+	}
+
+	var mappings []*TokenMapping
+	if err := json.Unmarshal(data, &mappings); err != nil {
+		return err
+	}
+
+	for _, mapping := range mappings {
+		ts.mappings[mapping.OpaqueID] = mapping
+	}
+
+	log.Printf("Loaded %d tokens from storage file", len(mappings))
+	return nil
+}
+
+func (ts *DurableTokenStore) saveToFile() error {
+	// Convert map to slice for JSON serialization
+	mappings := make([]*TokenMapping, 0, len(ts.mappings))
+	for _, mapping := range ts.mappings {
+		mappings = append(mappings, mapping)
+	}
+
+	data, err := json.MarshalIndent(mappings, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Write to temporary file first, then rename (atomic operation)
+	tempFile := ts.storageFile + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0600); err != nil {
+		return err
+	}
+
+	return os.Rename(tempFile, ts.storageFile)
 }
 
 var (
-	tokenStore      = NewTokenStore()
+	tokenStore      *DurableTokenStore
 	messagingClient *messaging.Client
 	privateKey      *rsa.PrivateKey
 )
@@ -109,6 +215,7 @@ func main() {
 	log.Printf("  Port: %s", *port)
 	log.Printf("  Firebase Key: %s", *serviceAccountKeyPath)
 	log.Printf("  Private Key: %s", *privateKeyPath)
+	log.Printf("  Storage File: %s", *storageFile)
 
 	// Read project ID from service account key
 	projectID, err := readProjectIDFromKey(*serviceAccountKeyPath)
@@ -139,6 +246,9 @@ func main() {
 		log.Fatalf("Error loading private key: %v", err)
 	}
 	log.Printf("RSA private key loaded successfully")
+
+	// Initialize durable token store
+	tokenStore = NewDurableTokenStore(*storageFile)
 
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send", handleSend)
@@ -215,13 +325,19 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Securely wipe decrypted token from memory
 	secureWipeString(&decryptedToken)
 
-	// Store encrypted token only after successful validation
-	tokenStore.AddToken(reg.EncryptedData)
+	// Store encrypted token and get opaque ID
+	opaqueID, err := tokenStore.AddToken(reg.EncryptedData, reg.Platform)
+	if err != nil {
+		log.Printf("Failed to store token: %v", err)
+		http.Error(w, "Failed to store token", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
 		"success":      true,
 		"message":      "Token registered successfully",
+		"token_id":     opaqueID,
 		"platform":     reg.Platform,
 		"total_tokens": tokenStore.Count(),
 	}
@@ -255,8 +371,8 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokens := tokenStore.GetTokens()
-	if len(tokens) == 0 {
+	opaqueIDs := tokenStore.GetAllOpaqueIDs()
+	if len(opaqueIDs) == 0 {
 		http.Error(w, "No tokens registered", http.StatusBadRequest)
 		return
 	}
@@ -264,13 +380,18 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	successCount := 0
 	errorCount := 0
 
-	for _, token := range tokens {
-		if err := sendFCMNotification(token, notif.Title, notif.Body); err != nil {
-			tokenPreview := token
-			if len(token) > 20 {
-				tokenPreview = token[:20] + "..."
-			}
-			log.Printf("Failed to send to token %s: %v", tokenPreview, err)
+	for _, opaqueID := range opaqueIDs {
+		encryptedToken, err := tokenStore.GetEncryptedToken(opaqueID)
+		if err != nil {
+			log.Printf("Failed to get token for opaque ID %s...%s: %v",
+				opaqueID[:8], opaqueID[len(opaqueID)-8:], err)
+			errorCount++
+			continue
+		}
+
+		if err := sendFCMNotification(encryptedToken, notif.Title, notif.Body); err != nil {
+			log.Printf("Failed to send to opaque ID %s...%s: %v",
+				opaqueID[:8], opaqueID[len(opaqueID)-8:], err)
 			errorCount++
 		} else {
 			successCount++
@@ -283,7 +404,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		"message":      fmt.Sprintf("Sent to %d devices, %d failures", successCount, errorCount),
 		"sent_count":   successCount,
 		"error_count":  errorCount,
-		"total_tokens": len(tokens),
+		"total_tokens": len(opaqueIDs),
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding response: %v", err)
@@ -310,22 +431,40 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if notif.EncryptedData == "" || notif.Title == "" || notif.Body == "" {
-		http.Error(w, "Encrypted data, title and body are required", http.StatusBadRequest)
+	if notif.Title == "" || notif.Body == "" {
+		http.Error(w, "Title and body are required", http.StatusBadRequest)
 		return
 	}
 
-	// Validate size limits for encrypted data
-	if len(notif.EncryptedData) < 100 {
-		http.Error(w, "Encrypted data too short", http.StatusBadRequest)
-		return
-	}
-	if len(notif.EncryptedData) > 10000 {
-		http.Error(w, "Encrypted data too long", http.StatusBadRequest)
+	// Support both opaque ID (new) and encrypted data (backward compatibility)
+	var encryptedData string
+	if notif.TokenID != "" {
+		// New opaque ID approach
+		var err error
+		encryptedData, err = tokenStore.GetEncryptedToken(notif.TokenID)
+		if err != nil {
+			log.Printf("Token ID not found: %s", notif.TokenID)
+			http.Error(w, "Token ID not found", http.StatusBadRequest)
+			return
+		}
+	} else if notif.EncryptedData != "" {
+		// Backward compatibility with encrypted data
+		// Validate size limits for encrypted data
+		if len(notif.EncryptedData) < 100 {
+			http.Error(w, "Encrypted data too short", http.StatusBadRequest)
+			return
+		}
+		if len(notif.EncryptedData) > 10000 {
+			http.Error(w, "Encrypted data too long", http.StatusBadRequest)
+			return
+		}
+		encryptedData = notif.EncryptedData
+	} else {
+		http.Error(w, "Either token_id or encrypted_data is required", http.StatusBadRequest)
 		return
 	}
 
-	if err := sendFCMNotification(notif.EncryptedData, notif.Title, notif.Body); err != nil {
+	if err := sendFCMNotification(encryptedData, notif.Title, notif.Body); err != nil {
 		log.Printf("Failed to send notification: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
