@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -18,6 +21,7 @@ var (
 	port                   = flag.String("port", "8443", "Port to listen on")
 	certFile               = flag.String("cert", "cert.pem", "Path to TLS certificate file")
 	keyFile                = flag.String("key", "key.pem", "Path to TLS private key file")
+	publicKeyPath          = flag.String("public-key", "public_key.pem", "Path to RSA public key file")
 	notificationBackendURL = flag.String("backend-url", "http://localhost:8080", "URL of the notification backend service")
 	version                = "dev" // Set by build flags
 )
@@ -28,50 +32,55 @@ type TokenRegistration struct {
 }
 
 type NotificationRequest struct {
-	EncryptedData string `json:"encrypted_data"`
+	TokenID       string `json:"token_id"`
+	PublicKeyHash string `json:"public_key_hash,omitempty"`
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 }
 
-// TokenStore holds device tokens in memory only
+// TokenStore holds opaque token identifiers in memory only
 // Deliberately separate from any user data for privacy
 type TokenStore struct {
-	mu     sync.RWMutex
-	tokens map[string]time.Time // token -> registration time
+	mu       sync.RWMutex
+	tokenIDs map[string]time.Time // opaque_token_id -> registration time
 }
 
 func NewTokenStore() *TokenStore {
 	return &TokenStore{
-		tokens: make(map[string]time.Time),
+		tokenIDs: make(map[string]time.Time),
 	}
 }
 
-func (ts *TokenStore) AddToken(token string) {
+func (ts *TokenStore) AddTokenID(tokenID string) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	ts.tokens[token] = time.Now()
+	ts.tokenIDs[tokenID] = time.Now()
 
-	// No token logging for privacy
-	log.Printf("Encrypted token stored (total: %d)", len(ts.tokens))
+	// Safe to log opaque IDs (they reveal nothing about actual tokens)
+	log.Printf("Opaque token ID stored: %s...%s (total: %d)",
+		tokenID[:8], tokenID[len(tokenID)-8:], len(ts.tokenIDs))
 }
 
-func (ts *TokenStore) GetTokens() []string {
+func (ts *TokenStore) GetTokenIDs() []string {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
-	tokens := make([]string, 0, len(ts.tokens))
-	for token := range ts.tokens {
-		tokens = append(tokens, token)
+	tokenIDs := make([]string, 0, len(ts.tokenIDs))
+	for tokenID := range ts.tokenIDs {
+		tokenIDs = append(tokenIDs, tokenID)
 	}
-	return tokens
+	return tokenIDs
 }
 
 func (ts *TokenStore) Count() int {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
-	return len(ts.tokens)
+	return len(ts.tokenIDs)
 }
 
-var tokenStore = NewTokenStore()
+var (
+	tokenStore    = NewTokenStore()
+	publicKeyHash string
+)
 
 func main() {
 	flag.Parse()
@@ -81,7 +90,16 @@ func main() {
 	log.Printf("  Port: %s", *port)
 	log.Printf("  TLS Cert: %s", *certFile)
 	log.Printf("  TLS Key: %s", *keyFile)
+	log.Printf("  Public Key: %s", *publicKeyPath)
 	log.Printf("  Backend URL: %s", *notificationBackendURL)
+	
+	// Load public key and compute hash
+	publicKeyPEM, err := readPublicKeyPEM(*publicKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading public key: %v", err)
+	}
+	publicKeyHash = computePublicKeyHash(publicKeyPEM)
+	log.Printf("Public key hash computed: %s", publicKeyHash[:16]+"...")
 
 	http.HandleFunc("/register", handleRegister)
 	http.HandleFunc("/send-all", handleSendAll)
@@ -121,14 +139,16 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store encrypted token in memory (privacy: no user data association, always encrypted)
-	tokenStore.AddToken(reg.EncryptedData)
-
-	// Forward to notification backend
-	if err := forwardTokenToBackend(reg); err != nil {
+	// Forward to notification backend first to get opaque ID
+	opaqueID, err := forwardTokenToBackend(reg)
+	if err != nil {
 		log.Printf("Failed to forward encrypted data to backend: %v", err)
-		// Still return success to app since we stored it
+		http.Error(w, "Failed to register token with backend", http.StatusInternalServerError)
+		return
 	}
+
+	// Store opaque ID in memory (privacy: no user data association, opaque identifier)
+	tokenStore.AddTokenID(opaqueID)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
@@ -154,8 +174,8 @@ func handleSendAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokens := tokenStore.GetTokens()
-	if len(tokens) == 0 {
+	tokenIDs := tokenStore.GetTokenIDs()
+	if len(tokenIDs) == 0 {
 		http.Error(w, "No tokens registered", http.StatusBadRequest)
 		return
 	}
@@ -163,16 +183,18 @@ func handleSendAll(w http.ResponseWriter, r *http.Request) {
 	successCount := 0
 	errorCount := 0
 
-	// Send individual notification for each token
-	for _, token := range tokens {
+	// Send individual notification for each token ID
+	for _, tokenID := range tokenIDs {
 		notifReq := NotificationRequest{
-			EncryptedData: token,
+			TokenID:       tokenID,
+			PublicKeyHash: publicKeyHash,
 			Title:         "App Notification",
 			Body:          message,
 		}
 
 		if err := sendNotificationToBackend(notifReq); err != nil {
-			log.Printf("Failed to send to encrypted token: %v", err)
+			log.Printf("Failed to send to token ID %s...%s: %v",
+				tokenID[:8], tokenID[len(tokenID)-8:], err)
 			errorCount++
 		} else {
 			successCount++
@@ -203,15 +225,15 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func forwardTokenToBackend(reg TokenRegistration) error {
+func forwardTokenToBackend(reg TokenRegistration) (string, error) {
 	data, err := json.Marshal(reg)
 	if err != nil {
-		return fmt.Errorf("failed to marshal token: %v", err)
+		return "", fmt.Errorf("failed to marshal token: %v", err)
 	}
 
 	resp, err := http.Post(*notificationBackendURL+"/register", "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		return fmt.Errorf("failed to post to backend: %v", err)
+		return "", fmt.Errorf("failed to post to backend: %v", err)
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -221,18 +243,38 @@ func forwardTokenToBackend(reg TokenRegistration) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("backend returned %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("backend returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	return nil
+	// Parse response to get opaque token ID
+	var response struct {
+		Success bool   `json:"success"`
+		TokenID string `json:"token_id"`
+		Message string `json:"message"`
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if !response.Success || response.TokenID == "" {
+		return "", fmt.Errorf("backend registration failed: %s", response.Message)
+	}
+
+	return response.TokenID, nil
 }
 
 func sendNotificationToBackend(notifReq NotificationRequest) error {
 	// Create the payload that notification-backend expects on /notify endpoint
 	payload := map[string]string{
-		"encrypted_data": notifReq.EncryptedData,
-		"title":          notifReq.Title,
-		"body":           notifReq.Body,
+		"token_id": notifReq.TokenID,
+		"title":    notifReq.Title,
+		"body":     notifReq.Body,
 	}
 
 	data, err := json.Marshal(payload)
@@ -287,7 +329,7 @@ const homeTemplate = `
     <div class="stats">
         <h2>📱 Device Tokens</h2>
         <p><strong>{{.TokenCount}}</strong> device tokens currently registered</p>
-        <p><small>Tokens stored in memory only, no user data association</small></p>
+        <p><small>Opaque token IDs stored in memory only, no user data association</small></p>
     </div>
 
     {{if .ShowResults}}
@@ -317,10 +359,11 @@ const homeTemplate = `
     <div class="privacy-note">
         <h3>🔒 Privacy Design</h3>
         <ul>
-            <li>Device tokens stored in RAM only (lost on restart)</li>
+            <li>Only opaque token IDs stored in RAM (lost on restart)</li>
             <li>No association with user accounts or personal data</li>
-            <li>Forwards tokens to notification backend without storing user context</li>
-            <li>Individual notification requests preserve token separation</li>
+            <li>Actual encrypted tokens stored only in notification backend</li>
+            <li>App backend cannot decrypt or access actual device tokens</li>
+            <li>Individual notification requests use opaque identifiers</li>
         </ul>
     </div>
 
@@ -335,3 +378,18 @@ const homeTemplate = `
 </body>
 </html>
 `
+
+// readPublicKeyPEM reads a public key PEM file and returns its content
+func readPublicKeyPEM(keyPath string) (string, error) {
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read public key file: %v", err)
+	}
+	return string(data), nil
+}
+
+// computePublicKeyHash computes a SHA256 hash of the public key for use in storage keys
+func computePublicKeyHash(publicKeyPEM string) string {
+	hash := sha256.Sum256([]byte(publicKeyPEM))
+	return hex.EncodeToString(hash[:])
+}
