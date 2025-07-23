@@ -1,8 +1,7 @@
 .gradle/
 .idea/
 app/build/
-# google-services.json excluded for real Firebase configs, but allow dummy for CI
-# app/google-services.json
+app/google-services.json
 build/
 local.properties
 gradle/
