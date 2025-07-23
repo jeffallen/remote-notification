@@ -8,6 +8,8 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -38,7 +40,13 @@ jobs:
     - name: Setup Gradle
       uses: gradle/gradle-build-action@v2
       with:
-        gradle-version: 8.4
+        gradle-version: 8.13
+    
+    - name: Create Firebase client config from secret
+      env:
+        FIREBASE_CLIENT_CONFIG: ${{ secrets.FIREBASE_CLIENT_CONFIG }}
+      run: |
+        echo "$FIREBASE_CLIENT_CONFIG" > demo-app/app/google-services.json
     
     - name: Build Release APK
       run: |
@@ -75,11 +83,11 @@ jobs:
         cd demo-app/app/build/outputs/apk/release
         VERSION=${GITHUB_REF#refs/tags/}
         if [ -f "app-release-signed.apk" ]; then
-          mv app-release-signed.apk "minnotif-android-${VERSION}-signed.apk"
-          echo "APK_NAME=minnotif-android-${VERSION}-signed.apk" >> $GITHUB_ENV
+          mv app-release-signed.apk "remote-notify-demo-app-${VERSION}-signed.apk"
+          echo "APK_NAME=remote-notify-demo-app-${VERSION}-signed.apk" >> $GITHUB_ENV
         else
-          mv app-release-unsigned.apk "minnotif-android-${VERSION}-unsigned.apk"
-          echo "APK_NAME=minnotif-android-${VERSION}-unsigned.apk" >> $GITHUB_ENV
+          mv app-release-unsigned.apk "remote-notify-demo-app-${VERSION}-unsigned.apk"
+          echo "APK_NAME=remote-notify-demo-app-${VERSION}-unsigned.apk" >> $GITHUB_ENV
         fi
     
     - name: Create Release
@@ -88,7 +96,7 @@ jobs:
         files: demo-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
         name: Release ${{ github.ref_name }}
         body: |
-          ## 📱 Android APK Release ${{ github.ref_name }}
+          ## 📱 Remote Notification Demo App Release ${{ github.ref_name }}
           
           **Download and install:**
           1. Download the APK file below
@@ -101,7 +109,7 @@ jobs:
           - App-backend cannot decrypt stored tokens
           
           **Files:**
-          - `${{ env.APK_NAME }}` - Android application package
+          - `${{ env.APK_NAME }}` - Remote notification demo Android app
           
           ---
           
@@ -116,72 +124,73 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Upload APK as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: android-apk-${{ github.ref_name }}
         path: demo-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
         retention-days: 90
 
-  build-go-binaries:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-    
-    - name: Build Go binaries
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/}
-        
-        # Build app-backend
-        cd app-backend
-        go build -ldflags "-X main.version=${VERSION}" -o ../bin/app-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
-        
-        # Build notification-backend  
-        cd ../notification-backend
-        go build -ldflags "-X main.version=${VERSION}" -o ../bin/notification-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
-    
-    - name: Upload Go binaries
-      uses: actions/upload-artifact@v3
-      with:
-        name: go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}
-        path: bin/*
-        retention-days: 90
-
-  upload-go-binaries:
-    needs: build-go-binaries
-    runs-on: ubuntu-latest
-    steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v3
-      with:
-        path: artifacts
-    
-    - name: Prepare binaries for release
-      run: |
-        mkdir -p release-binaries
-        find artifacts -name "go-binaries-*" -type d | while read dir; do
-          cp "$dir"/* release-binaries/ 2>/dev/null || true
-        done
-        ls -la release-binaries/
-    
-    - name: Upload Go binaries to release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: release-binaries/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Go binary builds commented out - Android APK only for now
+  # build-go-binaries:
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       goos: [linux, darwin, windows]
+  #       goarch: [amd64, arm64]
+  #       exclude:
+  #         - goos: windows
+  #           goarch: arm64
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #   
+  #   - name: Set up Go
+  #     uses: actions/setup-go@v4
+  #     with:
+  #       go-version: '1.21'
+  #   
+  #   - name: Build Go binaries
+  #     env:
+  #       GOOS: ${{ matrix.goos }}
+  #       GOARCH: ${{ matrix.goarch }}
+  #     run: |
+  #       VERSION=${GITHUB_REF#refs/tags/}
+  #       
+  #       # Build app-backend
+  #       cd app-backend
+  #       go build -ldflags "-X main.version=${VERSION}" -o ../bin/app-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
+  #       
+  #       # Build notification-backend  
+  #       cd ../notification-backend
+  #       go build -ldflags "-X main.version=${VERSION}" -o ../bin/notification-backend-${GOOS}-${GOARCH}${{ matrix.goos == 'windows' && '.exe' || '' }} .
+  #   
+  #   - name: Upload Go binaries
+  #     uses: actions/upload-artifact@v3
+  #     with:
+  #       name: go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+  #       path: bin/*
+  #       retention-days: 90
+  # 
+  # upload-go-binaries:
+  #   needs: build-go-binaries
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Download all artifacts
+  #     uses: actions/download-artifact@v3
+  #     with:
+  #       path: artifacts
+  #   
+  #   - name: Prepare binaries for release
+  #     run: |
+  #       mkdir -p release-binaries
+  #       find artifacts -name "go-binaries-*" -type d | while read dir; do
+  #         cp "$dir"/* release-binaries/ 2>/dev/null || true
+  #       done
+  #       ls -la release-binaries/
+  #   
+  #   - name: Upload Go binaries to release
+  #     uses: softprops/action-gh-release@v1
+  #     with:
+  #       files: release-binaries/*
+  #     env:
+  #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

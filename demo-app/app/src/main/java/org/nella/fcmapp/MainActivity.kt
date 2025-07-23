@@ -18,7 +18,7 @@ import java.security.KeyFactory
 import java.security.PublicKey
 import java.security.SecureRandom
 import java.security.spec.X509EncodedKeySpec
-import java.util.Base64
+import android.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -213,7 +213,7 @@ class MainActivity : AppCompatActivity() {
         keyLengthBytes[3] = encryptedAesKey.size.toByte()
         
         val combined = iv + keyLengthBytes + encryptedAesKey + encryptedToken
-        return Base64.getEncoder().encodeToString(combined)
+        return Base64.encodeToString(combined, Base64.DEFAULT)
     }
     
     private fun loadPublicKey(): PublicKey {
@@ -226,7 +226,7 @@ class MainActivity : AppCompatActivity() {
             .replace("\n", "")
             .replace("\r", "")
         
-        val keyBytes = Base64.getDecoder().decode(publicKeyBase64)
+        val keyBytes = Base64.decode(publicKeyBase64, Base64.DEFAULT)
         val keySpec = X509EncodedKeySpec(keyBytes)
         val keyFactory = KeyFactory.getInstance("RSA")
         
