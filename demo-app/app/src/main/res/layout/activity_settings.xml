@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Backend Server Configuration"
+        android:text="@string/settings_backend_config"
         android:textSize="20sp"
         android:textStyle="bold"
         android:layout_marginBottom="16dp" />
@@ -16,7 +16,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Enter the URL of your app backend server:"
+        android:text="@string/settings_enter_url"
         android:textSize="16sp"
         android:layout_marginBottom="8dp" />
 
@@ -24,7 +24,7 @@
         android:id="@+id/urlEditText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="https://demo.rn.nella.org"
+        android:hint="@string/settings_url_hint"
         android:inputType="textUri"
         android:layout_marginBottom="16dp"
         android:padding="12dp"
@@ -33,7 +33,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Examples:\n• https://demo.rn.nella.org\n• https://your-domain.com\n• https://10.0.2.2:8443 (Android emulator)"
+        android:text="@string/settings_examples"
         android:textSize="14sp"
         android:textColor="@android:color/darker_gray"
         android:layout_marginBottom="24dp" />
@@ -49,7 +49,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Reset to Default"
+            android:text="@string/button_reset_default"
             android:layout_marginEnd="8dp"
             style="?android:attr/borderlessButtonStyle" />
 
@@ -58,7 +58,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Save"
+            android:text="@string/button_save"
             android:layout_marginStart="8dp" />
 
     </LinearLayout>
@@ -66,7 +66,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="\n🔒 Security Note:\nAll communication uses encrypted notification tokens. The backend URL should use HTTPS for security."
+        android:text="@string/settings_security_note"
         android:textSize="12sp"
         android:textColor="@android:color/darker_gray"
         android:layout_marginTop="24dp"

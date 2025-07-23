@@ -76,17 +76,17 @@ class MainActivity : AppCompatActivity() {
     
     private fun updateStatusWithBackendUrl() {
         val backendUrl = SettingsActivity.getBackendUrl(this)
-        updateStatus("Ready to register with backend: $backendUrl")
+        updateStatus(getString(R.string.status_ready_to_register, backendUrl))
     }
     
     private fun registerDeviceToken() {
-        updateStatus("Getting notification token...")
+        updateStatus(getString(R.string.status_getting_token))
         registerButton.isEnabled = false
         
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
                 Log.w(TAG, "Fetching Firebase registration token failed", task.exception)
-                updateStatus("Failed to get notification token: ${task.exception?.message}")
+                updateStatus(getString(R.string.status_failed_get_token, task.exception?.message ?: ""))
                 registerButton.isEnabled = true
                 return@addOnCompleteListener
             }
@@ -101,14 +101,14 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun sendTokenToServer(token: String) {
-        updateStatus("Encrypting and sending token to server...")
+        updateStatus(getString(R.string.status_encrypting_token))
         
         // Encrypt the token before sending
         val encryptedToken = try {
             encryptToken(token)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to encrypt token", e)
-            updateStatus("Failed to encrypt token: ${e.message}")
+            updateStatus(getString(R.string.status_failed_encrypt, e.message ?: ""))
             registerButton.isEnabled = true
             return
         }
@@ -131,7 +131,7 @@ class MainActivity : AppCompatActivity() {
             override fun onFailure(call: Call, e: IOException) {
                 Log.e(TAG, "Failed to send token to server", e)
                 runOnUiThread {
-                    updateStatus("Failed to register token: ${e.message}")
+                    updateStatus(getString(R.string.status_failed_register, e.message ?: ""))
                     registerButton.isEnabled = true
                 }
             }
@@ -142,9 +142,9 @@ class MainActivity : AppCompatActivity() {
                 
                 runOnUiThread {
                     if (response.isSuccessful) {
-                        updateStatus("Encrypted token registered successfully!")
+                        updateStatus(getString(R.string.status_success))
                     } else {
-                        updateStatus("Server error: ${response.code}\n$responseBody")
+                        updateStatus(getString(R.string.status_server_error, response.code, responseBody))
                     }
                     registerButton.isEnabled = true
                 }
