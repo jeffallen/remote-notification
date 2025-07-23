@@ -58,19 +58,19 @@ class SettingsActivity : AppCompatActivity() {
         
         // Enable back button
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Settings"
+        supportActionBar?.title = getString(R.string.settings_title)
     }
     
     private fun saveUrl() {
         val url = urlEditText.text.toString().trim()
         
         if (url.isEmpty()) {
-            Toast.makeText(this, "URL cannot be empty", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.toast_url_empty), Toast.LENGTH_SHORT).show()
             return
         }
         
         if (!isValidUrl(url)) {
-            Toast.makeText(this, "Please enter a valid URL (e.g., https://example.com)", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.toast_url_invalid), Toast.LENGTH_LONG).show()
             return
         }
         
@@ -78,7 +78,7 @@ class SettingsActivity : AppCompatActivity() {
         val cleanUrl = url.trimEnd('/')
         
         setBackendUrl(this, cleanUrl)
-        Toast.makeText(this, "Backend URL saved successfully", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_url_saved), Toast.LENGTH_SHORT).show()
         
         // Return to main activity
         finish()
@@ -86,7 +86,7 @@ class SettingsActivity : AppCompatActivity() {
     
     private fun resetToDefault() {
         urlEditText.setText(DEFAULT_BACKEND_URL)
-        Toast.makeText(this, "Reset to default URL", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_reset_default), Toast.LENGTH_SHORT).show()
     }
     
     private fun isValidUrl(url: String): Boolean {

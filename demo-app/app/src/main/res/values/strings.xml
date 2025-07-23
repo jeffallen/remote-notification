@@ -1,3 +1,36 @@
 <resources>
+    <!-- App name -->
     <string name="app_name">Remote Notify Demo App</string>
+    
+    <!-- Main Activity -->
+    <string name="title_token_registration">Token Registration</string>
+    <string name="button_register_device_token">Register Device Token</string>
+    <string name="status_ready_to_register">Ready to register with backend: %1$s</string>
+    <string name="status_press_button">Press the button to register your device token</string>
+    <string name="status_getting_token">Getting notification token...</string>
+    <string name="status_failed_get_token">Failed to get notification token: %1$s</string>
+    <string name="status_encrypting_token">Encrypting and sending token to server...</string>
+    <string name="status_failed_encrypt">Failed to encrypt token: %1$s</string>
+    <string name="status_failed_register">Failed to register token: %1$s</string>
+    <string name="status_success">Encrypted token registered successfully!</string>
+    <string name="status_server_error">Server error: %1$d\n%2$s</string>
+    
+    <!-- Settings Activity -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_backend_config">Backend Server Configuration</string>
+    <string name="settings_enter_url">Enter the URL of your app backend server:</string>
+    <string name="settings_url_hint">https://demo.rn.nella.org</string>
+    <string name="settings_examples">Examples:\n• https://demo.rn.nella.org\n• https://your-domain.com\n• https://10.0.2.2:8443 (Android emulator)</string>
+    <string name="button_reset_default">Reset to Default</string>
+    <string name="button_save">Save</string>
+    <string name="settings_security_note">\n🔒 Security Note:\nAll communication uses encrypted notification tokens. The backend URL should use HTTPS for security.</string>
+    
+    <!-- Toast messages -->
+    <string name="toast_url_empty">URL cannot be empty</string>
+    <string name="toast_url_invalid">Please enter a valid URL (e.g., https://example.com)</string>
+    <string name="toast_url_saved">Backend URL saved successfully</string>
+    <string name="toast_reset_default">Reset to default URL</string>
+    
+    <!-- Menu -->
+    <string name="menu_settings">Settings</string>
 </resources>

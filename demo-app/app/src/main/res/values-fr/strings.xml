@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nom de l'application -->
+    <string name="app_name">App de Démo Remote Notify</string>
+    
+    <!-- Activité principale -->
+    <string name="title_token_registration">Enregistrement du Token</string>
+    <string name="button_register_device_token">Enregistrer le Token d’Appareil</string>
+    <string name="status_ready_to_register">Prêt à s’enregistrer avec le backend : %1$s</string>
+    <string name="status_press_button">Appuyez sur le bouton pour enregistrer votre token d’appareil</string>
+    <string name="status_getting_token">Récupération du token de notification...</string>
+    <string name="status_failed_get_token">Échec de la récupération du token de notification : %1$s</string>
+    <string name="status_encrypting_token">Chiffrement et envoi du token au serveur...</string>
+    <string name="status_failed_encrypt">Échec du chiffrement du token : %1$s</string>
+    <string name="status_failed_register">Échec de l’enregistrement du token : %1$s</string>
+    <string name="status_success">Token chiffré enregistré avec succès !</string>
+    <string name="status_server_error">Erreur serveur : %1$d\n%2$s</string>
+    
+    <!-- Activité de paramètres -->
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_backend_config">Configuration du Serveur Backend</string>
+    <string name="settings_enter_url">Entrez l’URL de votre serveur backend d’application :</string>
+    <string name="settings_url_hint">https://demo.rn.nella.org</string>
+    <string name="settings_examples">Exemples :\n• https://demo.rn.nella.org\n• https://votre-domaine.com\n• https://10.0.2.2:8443 (émulateur Android)</string>
+    <string name="button_reset_default">Réinitialiser par Défaut</string>
+    <string name="button_save">Enregistrer</string>
+    <string name="settings_security_note">\n🔒 Note de Sécurité :\nToute communication utilise des tokens de notification chiffrés. L’URL du backend devrait utiliser HTTPS pour la sécurité.</string>
+    
+    <!-- Messages toast -->
+    <string name="toast_url_empty">L’URL ne peut pas être vide</string>
+    <string name="toast_url_invalid">Veuillez entrer une URL valide (ex: https://example.com)</string>
+    <string name="toast_url_saved">URL du backend enregistrée avec succès</string>
+    <string name="toast_reset_default">Réinitialisation à l’URL par défaut</string>
+    
+    <!-- Menu -->
+    <string name="menu_settings">Paramètres</string>
+</resources>
