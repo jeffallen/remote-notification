@@ -1,4 +1,4 @@
-package org.nella.fcmapp
+package org.nella.rn.demo
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -17,9 +17,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     
     companion object {
-        const val PREFS_NAME = "FCMAppSettings"
+        const val PREFS_NAME = "RnDemoSettings"
         const val PREF_BACKEND_URL = "backend_url"
-        const val DEFAULT_BACKEND_URL = "https://r-notify.nella.org"
+        const val DEFAULT_BACKEND_URL = "https://demo.rn.nella.org"
         
         fun getBackendUrl(context: Context): String {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

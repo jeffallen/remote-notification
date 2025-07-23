@@ -1,4 +1,4 @@
-package org.nella.fcmapp
+package org.nella.rn.demo
 
 import android.content.Intent
 import android.os.Bundle
@@ -80,20 +80,20 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun registerDeviceToken() {
-        updateStatus("Getting FCM token...")
+        updateStatus("Getting notification token...")
         registerButton.isEnabled = false
         
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
-                Log.w(TAG, "Fetching FCM registration token failed", task.exception)
-                updateStatus("Failed to get FCM token: ${task.exception?.message}")
+                Log.w(TAG, "Fetching Firebase registration token failed", task.exception)
+                updateStatus("Failed to get notification token: ${task.exception?.message}")
                 registerButton.isEnabled = true
                 return@addOnCompleteListener
             }
             
-            // Get new FCM registration token
+            // Get new Firebase registration token
             val token = task.result
-            Log.d(TAG, "FCM Registration Token: $token")
+            Log.d(TAG, "Firebase Registration Token: $token")
             
             // Send token to server
             sendTokenToServer(token)

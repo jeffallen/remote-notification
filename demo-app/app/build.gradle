@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace 'org.nella.fcmapp'
+    namespace 'org.nella.rn.demo'
     compileSdk 36
 
     defaultConfig {
-        applicationId "org.nella.fcmapp"
+        applicationId "org.nella.rn.demo"
         minSdk 21
         targetSdk 34
         versionCode 1
