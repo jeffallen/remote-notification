@@ -8,6 +8,8 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -81,11 +83,11 @@ jobs:
         cd demo-app/app/build/outputs/apk/release
         VERSION=${GITHUB_REF#refs/tags/}
         if [ -f "app-release-signed.apk" ]; then
-          mv app-release-signed.apk "minnotif-android-${VERSION}-signed.apk"
-          echo "APK_NAME=minnotif-android-${VERSION}-signed.apk" >> $GITHUB_ENV
+          mv app-release-signed.apk "remote-notify-demo-app-${VERSION}-signed.apk"
+          echo "APK_NAME=remote-notify-demo-app-${VERSION}-signed.apk" >> $GITHUB_ENV
         else
-          mv app-release-unsigned.apk "minnotif-android-${VERSION}-unsigned.apk"
-          echo "APK_NAME=minnotif-android-${VERSION}-unsigned.apk" >> $GITHUB_ENV
+          mv app-release-unsigned.apk "remote-notify-demo-app-${VERSION}-unsigned.apk"
+          echo "APK_NAME=remote-notify-demo-app-${VERSION}-unsigned.apk" >> $GITHUB_ENV
         fi
     
     - name: Create Release
@@ -94,7 +96,7 @@ jobs:
         files: demo-app/app/build/outputs/apk/release/${{ env.APK_NAME }}
         name: Release ${{ github.ref_name }}
         body: |
-          ## 📱 Android APK Release ${{ github.ref_name }}
+          ## 📱 Remote Notification Demo App Release ${{ github.ref_name }}
           
           **Download and install:**
           1. Download the APK file below
@@ -107,7 +109,7 @@ jobs:
           - App-backend cannot decrypt stored tokens
           
           **Files:**
-          - `${{ env.APK_NAME }}` - Android application package
+          - `${{ env.APK_NAME }}` - Remote notification demo Android app
           
           ---
           
