@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace 'org.nella.RN.demo'
+    namespace 'org.nella.rn.demo'
     compileSdk 36
 
     defaultConfig {
-        applicationId "org.nella.RN.demo"
+        applicationId "org.nella.rn.demo"
         minSdk 21
         targetSdk 34
         versionCode 1

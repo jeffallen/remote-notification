@@ -1,4 +1,4 @@
-package org.nella.RN.demo
+package org.nella.rn.demo
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -1,4 +1,4 @@
-package org.nella.RN.demo
+package org.nella.rn.demo
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
