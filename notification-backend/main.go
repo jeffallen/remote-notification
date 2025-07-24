@@ -739,12 +739,24 @@ func loadPrivateKey(keyPath string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %v", err)
+	// Try PKCS#1 format first ("-----BEGIN RSA PRIVATE KEY-----")
+	if privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return privateKey, nil
 	}
 
-	return privateKey, nil
+	// Try PKCS#8 format ("-----BEGIN PRIVATE KEY-----")
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key (tried both PKCS#1 and PKCS#8 formats): %v", err)
+	}
+
+	// Ensure it's an RSA private key
+	rsaKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("key is not an RSA private key")
+	}
+
+	return rsaKey, nil
 }
 
 func decryptHybridToken(encryptedData string) (string, error) {
