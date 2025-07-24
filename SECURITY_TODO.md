@@ -6,9 +6,9 @@ This document provides an actionable checklist of security improvements needed f
 
 ---
 
-## 🔴 **CRITICAL PRIORITY** (Fix Immediately)
+## 🔴 **CRITICAL PRIORITY** ~~(Fix Immediately)~~ **COMPLETED**
 
-### ☐ **TODO-001: Update Go Runtime to 1.24.5+**
+### ✅ **TODO-001: Update Go Runtime to 1.24.5+** *(COMPLETED)*
 - **Issue:** 3 active vulnerabilities in Go 1.24.3 standard library
 - **Impact:** HTTP header leaks, file operation inconsistencies, certificate validation bypass
 - **Action:** Update both app-backend and notification-backend Go runtime
@@ -45,9 +45,9 @@ This document provides an actionable checklist of security improvements needed f
 
 ---
 
-## 🟡 **HIGH PRIORITY** (Fix Soon)
+## 🟡 **HIGH PRIORITY** ~~(Fix Soon)~~ **3/5 COMPLETED**
 
-### ☐ **TODO-005: Update Kotlin to 2.2.0**
+### ✅ **TODO-005: Update Kotlin to 2.2.0** *(COMPLETED)*
 - **Issue:** Using Kotlin 1.9.10 (significantly outdated)
 - **Impact:** Missing security fixes and language improvements
 - **Action:** Update `kotlin_version` in `demo-app/build.gradle`
@@ -65,7 +65,7 @@ This document provides an actionable checklist of security improvements needed f
 - **Libraries:** `golang.org/x/time/rate` or middleware package
 - **Effort:** Medium (2-3 hours)
 
-### ☐ **TODO-007: Update Firebase and Cloud Dependencies**
+### ✅ **TODO-007: Update Firebase and Cloud Dependencies** *(COMPLETED)*
 - **Issue:** Multiple Go modules have newer versions available
 - **Impact:** Missing bug fixes and security patches
 - **Action:** Update major dependencies in notification-backend
@@ -76,7 +76,7 @@ This document provides an actionable checklist of security improvements needed f
 - **Files:** `notification-backend/go.mod`
 - **Effort:** Low (1 hour)
 
-### ☐ **TODO-008: Add Request/Response Logging**
+### ✅ **TODO-008: Add Request/Response Logging** *(COMPLETED)*
 - **Issue:** Limited observability into API usage and errors
 - **Impact:** Difficult to detect attacks or troubleshoot issues
 - **Action:** Add structured logging for all HTTP requests
@@ -93,9 +93,9 @@ This document provides an actionable checklist of security improvements needed f
 
 ---
 
-## 🟢 **MEDIUM PRIORITY** (Improve Over Time)
+## 🟢 **MEDIUM PRIORITY** ~~(Improve Over Time)~~ **1/5 COMPLETED**
 
-### ☐ **TODO-010: Upgrade Java Target to 11+**
+### ✅ **TODO-010: Upgrade Java Target to 11+** *(COMPLETED)*
 - **Issue:** Using Java 1.8 (EOL, missing security features)
 - **Impact:** Missing modern security improvements
 - **Action:** Update `sourceCompatibility` and `targetCompatibility` to JavaVersion.VERSION_11
