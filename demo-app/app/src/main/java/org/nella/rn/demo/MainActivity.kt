@@ -28,7 +28,6 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import javax.net.ssl.HostnameVerifier
 import org.json.JSONObject
-import org.nella.rn.demo.BuildConfig
 
 class MainActivity : AppCompatActivity() {
     
@@ -38,6 +37,9 @@ class MainActivity : AppCompatActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
+        // Set to true to force debug certificate behavior for testing
+        // WARNING: Never set to true in production builds
+        private const val FORCE_DEBUG_CERTIFICATES = false
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -163,10 +165,34 @@ class MainActivity : AppCompatActivity() {
      * - Release builds: Strict certificate validation using system CAs only
      */
     private fun createHttpClient(): OkHttpClient {
-        return if (BuildConfig.DEBUG) {
+        return if (isDebugBuild()) {
             createDebugHttpClient()
         } else {
             createReleaseHttpClient()
+        }
+    }
+    
+    /**
+     * Determines if this is a debug build by checking application info
+     * Falls back to safe release behavior if detection fails
+     */
+    private fun isDebugBuild(): Boolean {
+        // Manual override for testing (WARNING: Never use in production)
+        if (FORCE_DEBUG_CERTIFICATES) {
+            Log.w(TAG, "WARNING: Using forced debug certificate mode - not for production!")
+            return true
+        }
+        
+        return try {
+            // Check application debuggable flag
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            val isDebuggable = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            
+            Log.i(TAG, "Build type detection - Debuggable flag: $isDebuggable")
+            return isDebuggable
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking debug build status, defaulting to release mode for security", e)
+            false // Default to release behavior for safety
         }
     }
     
