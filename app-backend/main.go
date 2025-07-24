@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,10 +78,110 @@ func (ts *TokenStore) Count() int {
 	return len(ts.tokenIDs)
 }
 
+// RequestLog represents a structured log entry for HTTP requests
+type RequestLog struct {
+	Timestamp    time.Time `json:"timestamp"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	RemoteAddr   string    `json:"remote_addr"`
+	UserAgent    string    `json:"user_agent"`
+	StatusCode   int       `json:"status_code"`
+	ResponseTime int64     `json:"response_time_ms"`
+	BodySize     int64     `json:"body_size"`
+	Error        string    `json:"error,omitempty"`
+}
+
+// ResponseWriter wrapper to capture status code and response size
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	bodySize   int64
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
+	size, err := lrw.ResponseWriter.Write(b)
+	lrw.bodySize += int64(size)
+	return size, err
+}
+
 var (
 	tokenStore    = NewTokenStore()
 	publicKeyHash string
 )
+
+// loggingMiddleware wraps HTTP handlers to provide structured logging
+func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		// Create logging response writer
+		lrw := &loggingResponseWriter{
+			ResponseWriter: w,
+			statusCode:     200, // Default status code
+		}
+		
+		// Call the next handler
+		next(lrw, r)
+		
+		// Calculate response time
+		responseTime := time.Since(start).Milliseconds()
+		
+		// Create structured log entry
+		logEntry := RequestLog{
+			Timestamp:    start,
+			Method:       r.Method,
+			Path:         r.URL.Path,
+			RemoteAddr:   getClientIP(r),
+			UserAgent:    r.UserAgent(),
+			StatusCode:   lrw.statusCode,
+			ResponseTime: responseTime,
+			BodySize:     lrw.bodySize,
+		}
+		
+		// Add error field for non-2xx responses
+		if lrw.statusCode >= 400 {
+			logEntry.Error = http.StatusText(lrw.statusCode)
+		}
+		
+		// Log as JSON
+		logJSON, err := json.Marshal(logEntry)
+		if err != nil {
+			log.Printf("Error marshaling log entry: %v", err)
+			return
+		}
+		
+		log.Printf("REQUEST_LOG: %s", string(logJSON))
+	}
+}
+
+// getClientIP extracts the real client IP from request headers
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (for proxies/load balancers)
+	if xForwardedFor := r.Header.Get("X-Forwarded-For"); xForwardedFor != "" {
+		// X-Forwarded-For can contain multiple IPs, take the first one
+		ifs := strings.Split(xForwardedFor, ",")
+		if len(ifs) > 0 {
+			return strings.TrimSpace(ifs[0])
+		}
+	}
+	
+	// Check X-Real-IP header (for nginx)
+	if xRealIP := r.Header.Get("X-Real-IP"); xRealIP != "" {
+		return xRealIP
+	}
+		
+	// Fall back to RemoteAddr
+	// Remove port if present
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx != -1 {
+		return r.RemoteAddr[:idx]
+	}
+	return r.RemoteAddr
+}
 
 func main() {
 	flag.Parse()
@@ -101,9 +202,9 @@ func main() {
 	publicKeyHash = computePublicKeyHash(publicKeyPEM)
 	log.Printf("Public key hash computed: %s", publicKeyHash[:16]+"...")
 
-	http.HandleFunc("/register", handleRegister)
-	http.HandleFunc("/send-all", handleSendAll)
-	http.HandleFunc("/", handleHome)
+	http.HandleFunc("/register", loggingMiddleware(handleRegister))
+	http.HandleFunc("/send-all", loggingMiddleware(handleSendAll))
+	http.HandleFunc("/", loggingMiddleware(handleHome))
 
 	log.Printf("App Backend Server starting on HTTPS port %s", *port)
 	log.Printf("Web interface available at: https://localhost:%s", *port)
