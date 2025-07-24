@@ -100,6 +100,22 @@ This document provides an actionable checklist of security improvements needed f
 - **Impact:** Missing modern security improvements
 - **Action:** Update `sourceCompatibility` and `targetCompatibility` to JavaVersion.VERSION_11
 - **Files:** `demo-app/app/build.gradle`
+- **Android Compatibility Analysis:**
+  - **Java 11 Target:** Safe upgrade, no minSdk impact
+  - **Current minSdk 21** (Android 5.0+) remains unchanged
+  - **ART Runtime:** Android 5.0+ supports Java 11 bytecode natively
+  - **Market Coverage:** No reduction in addressable market
+  - **Compatibility:** Java 11 features compile to compatible bytecode
+  - **AGP Support:** Android Gradle Plugin 8.11.0 fully supports Java 11
+  - **Desugaring:** AGP automatically handles Java 11 features for older Android versions
+  - **Performance:** Potential improvements from newer compiler optimizations
+  - **Security:** Access to enhanced cryptographic APIs and security patches
+- **Trade-offs:**
+  - ✅ **Pros:** Better security, modern language features, improved tooling
+  - ✅ **Pros:** No impact on app compatibility or market reach
+  - ⚠️ **Cons:** Slightly larger APK size (minimal, <1%)
+  - ⚠️ **Cons:** Build time may increase slightly during compilation
+- **Verification:** Test on Android 5.0 (minSdk 21) device to confirm compatibility
 - **Effort:** Low (30 minutes)
 
 ### ☐ **TODO-011: Implement Key Rotation Mechanism**
