@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- RELEASE BUILD: Strict certificate validation -->
+    <domain-config cleartextTrafficPermitted="false">
+        <!-- Production domains should use proper CA-signed certificates -->
+        <domain includeSubdomains="true">your-production-domain.com</domain>
+        <trust-anchors>
+            <!-- Only trust system CAs in release builds -->
+            <certificates src="system"/>
+        </trust-anchors>
+    </domain-config>
+    
+    <!-- Strict base configuration for release builds -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Only system certificate authorities -->
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    
+    <!-- No debug overrides in release builds -->
+</network-security-config>

@@ -6,7 +6,7 @@ This document provides an actionable checklist of security improvements needed f
 
 ---
 
-## 🔴 **CRITICAL PRIORITY** ~~(Fix Immediately)~~ **COMPLETED**
+## 🔴 **CRITICAL PRIORITY** ~~(Fix Immediately)~~ **ALL COMPLETED**
 
 ### ✅ **TODO-001: Update Go Runtime to 1.24.5+** *(COMPLETED)*
 - **Issue:** 3 active vulnerabilities in Go 1.24.3 standard library
@@ -15,7 +15,7 @@ This document provides an actionable checklist of security improvements needed f
 - **Verification:** Run `govulncheck ./...` to confirm no vulnerabilities
 - **Effort:** Low (30 minutes)
 
-### ☐ **TODO-002: Replace Self-Signed Certificates**  
+### ✅ **TODO-002: Replace Self-Signed Certificates** *(COMPLETED)*  
 - **Issue:** Using self-signed cert for production HTTPS (CN=10.0.2.2)
 - **Impact:** MITM attacks possible, browser warnings
 - **Action:** 

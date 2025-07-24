@@ -28,12 +28,13 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import javax.net.ssl.HostnameVerifier
 import org.json.JSONObject
+import org.nella.rn.demo.BuildConfig
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var registerButton: Button
     private lateinit var statusText: TextView
-    private val client = createUnsafeOkHttpClient()
+    private val client = createHttpClient()
     
     companion object {
         private const val TAG = "MainActivity"
@@ -156,32 +157,67 @@ class MainActivity : AppCompatActivity() {
         statusText.text = message
     }
     
-    private fun createUnsafeOkHttpClient(): OkHttpClient {
+    /**
+     * Creates HTTP client with build-appropriate certificate validation
+     * - Debug builds: Allow self-signed certificates for development
+     * - Release builds: Strict certificate validation using system CAs only
+     */
+    private fun createHttpClient(): OkHttpClient {
+        return if (BuildConfig.DEBUG) {
+            createDebugHttpClient()
+        } else {
+            createReleaseHttpClient()
+        }
+    }
+    
+    /**
+     * Debug HTTP client - allows self-signed certificates for development
+     * WARNING: Only used in debug builds, never in production
+     */
+    private fun createDebugHttpClient(): OkHttpClient {
         return try {
-            // Create a trust manager that does not validate certificate chains
+            Log.w(TAG, "DEBUG BUILD: Using development HTTP client that accepts self-signed certificates")
+            
+            // Create a trust manager that accepts self-signed certificates
             val trustAllCerts = arrayOf<TrustManager>(
                 object : X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
+                        Log.d(TAG, "Debug: Accepting client certificate: ${chain[0].subjectDN}")
+                    }
+                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                        Log.d(TAG, "Debug: Accepting server certificate: ${chain[0].subjectDN}")
+                    }
                     override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
                 }
             )
 
-            // Install the all-trusting trust manager
-            val sslContext = SSLContext.getInstance("SSL")
-            sslContext.init(null, trustAllCerts, java.security.SecureRandom())
-
-            // Create an ssl socket factory with our all-trusting manager
-            val sslSocketFactory = sslContext.socketFactory
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, trustAllCerts, SecureRandom())
 
             OkHttpClient.Builder()
-                .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
-                .hostnameVerifier(HostnameVerifier { _, _ -> true })
+                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                .hostnameVerifier { hostname, _ -> 
+                    Log.d(TAG, "Debug: Accepting hostname: $hostname")
+                    true
+                }
                 .build()
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating unsafe HTTP client", e)
-            OkHttpClient()
+            Log.e(TAG, "Error creating debug HTTP client", e)
+            OkHttpClient() // Fallback to default client
         }
+    }
+    
+    /**
+     * Release HTTP client - strict certificate validation
+     * Uses system certificate authorities only for production security
+     */
+    private fun createReleaseHttpClient(): OkHttpClient {
+        Log.i(TAG, "RELEASE BUILD: Using secure HTTP client with strict certificate validation")
+        
+        // Use default OkHttpClient which respects network security config
+        // This will enforce the release network_security_config.xml settings
+        return OkHttpClient.Builder()
+            .build()
     }
     
     private fun encryptToken(token: String): String {
